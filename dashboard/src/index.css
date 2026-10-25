@@ -1,0 +1,108 @@
+@import 'tailwindcss';
+@custom-variant dark (&:where(.dark, .dark *));
+:root {
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  color: #172033;
+  background: #f4f6fa;
+  font-synthesis: none;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  min-width: 320px;
+}
+.dark {
+  color: #e5e9f2;
+  background: #090b10;
+}
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+.glass {
+  background: color-mix(in srgb, currentColor 3%, transparent);
+  border: 1px solid color-mix(in srgb, currentColor 10%, transparent);
+}
+.card {
+  border: 1px solid #e2e7ef;
+  background: white;
+  border-radius: 18px;
+  box-shadow: 0 1px 2px #11182708;
+}
+.dark .card {
+  border-color: #242936;
+  background: #11141b;
+  box-shadow: 0 1px 0 #ffffff08;
+}
+.field {
+  width: 100%;
+  border: 1px solid #d7dce5;
+  background: transparent;
+  border-radius: 10px;
+  padding: 0.65rem 0.8rem;
+  outline: none;
+}
+.field:focus {
+  border-color: #7667f5;
+  box-shadow: 0 0 0 3px #7667f522;
+}
+.dark .field {
+  border-color: #303644;
+}
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  border-radius: 10px;
+  padding: 0.62rem 0.9rem;
+  font-weight: 600;
+  transition: 0.18s;
+  cursor: pointer;
+}
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.primary {
+  background: #6d5dfc;
+  color: white;
+}
+.primary:hover {
+  background: #5b4ce8;
+  transform: translateY(-1px);
+}
+.secondary {
+  border: 1px solid #d9dee7;
+  background: transparent;
+}
+.dark .secondary {
+  border-color: #343a48;
+}
+.danger {
+  background: #ef444418;
+  color: #ef4444;
+}
+.nav-active {
+  background: #6d5dfc18;
+  color: #7c6cff;
+}
+.skeleton {
+  animation: pulse 1.5s infinite;
+  background: #94a3b820;
+  border-radius: 12px;
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+@media (max-width: 767px) {
+  .mobile-hide {
+    display: none !important;
+  }
+}
