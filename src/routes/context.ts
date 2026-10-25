@@ -1,0 +1,24 @@
+import type { Env } from '../config/env.js';
+import type { Repository } from '../repositories/repository.js';
+import type { ClientService } from '../services/clients.js';
+import type { KnowledgeService } from '../services/knowledge.js';
+import type { ChatService } from '../services/chat.js';
+import type { ObjectStorage } from '../providers/storage.js';
+import type { VectorProvider } from '../providers/vector.js';
+import type { EmbeddingProvider } from '../providers/embedding.js';
+import type { LlmProvider } from '../providers/llm.js';
+import type { NotificationProvider } from '../providers/notification.js';
+import type { Metrics } from '../lib/metrics.js';
+export type Context = {
+  env: Env;
+  repo: Repository;
+  clients: ClientService;
+  knowledge: KnowledgeService;
+  chat: ChatService;
+  storage: ObjectStorage;
+  vector: VectorProvider;
+  embedding: EmbeddingProvider;
+  llm: LlmProvider;
+  notification: NotificationProvider;
+  metrics: Metrics;
+};
