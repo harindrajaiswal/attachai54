@@ -854,8 +854,11 @@ function Knowledge({ client }: { client?: Client }) {
       load();
     } catch (e) {
       toast.error((e as Error).message);
+      // Storage may already contain the file even when indexing failed.
+      void load();
     } finally {
       setBusy(false);
+      e.target.value = '';
     }
   }
   async function del(name: string) {
@@ -875,6 +878,7 @@ function Knowledge({ client }: { client?: Client }) {
               hidden
               type="file"
               multiple
+              disabled={busy}
               accept=".txt,.md,.pdf,.docx"
               onChange={upload}
             />
@@ -889,12 +893,18 @@ function Knowledge({ client }: { client?: Client }) {
         <div className="p-4 flex justify-end">
           <button
             className="btn secondary"
+            disabled={busy}
             onClick={async () => {
               setBusy(true);
-              await api(`/clients/${client!.id}/knowledge/rebuild`, { method: 'POST' });
-              setBusy(false);
-              load();
-              toast.success('Index rebuilt');
+              try {
+                await api(`/clients/${client!.id}/knowledge/rebuild`, { method: 'POST' });
+                await load();
+                toast.success('Index rebuilt');
+              } catch (e) {
+                toast.error((e as Error).message);
+              } finally {
+                setBusy(false);
+              }
             }}
           >
             <RefreshCw size={16} />
@@ -920,8 +930,8 @@ function Knowledge({ client }: { client?: Client }) {
                     <td>{Math.ceil((f.size || f.bytes) / 1024)} KB</td>
                     <td>{f.chunks}</td>
                     <td>
-                      <span className="text-emerald-500 flex gap-1">
-                        <CheckCircle2 size={16} />
+                      <span className={`flex gap-1 ${f.embeddingStatus === 'failed' ? 'text-red-500' : f.embeddingStatus === 'ready' ? 'text-emerald-500' : 'text-amber-500'}`}>
+                        {f.embeddingStatus === 'failed' ? <AlertCircle size={16} /> : <CheckCircle2 size={16} />}
                         {f.embeddingStatus || f.status}
                       </span>
                     </td>
