@@ -1,0 +1,9 @@
+node_modules
+dashboard/node_modules
+dist
+public/admin
+data
+coverage
+dashboard/test-results
+dashboard/playwright-report
+*.zip

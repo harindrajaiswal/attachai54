@@ -1,0 +1,3 @@
+# UI component inventory
+
+`dashboard/src/main.tsx` provides reusable `Button`, `Input`, `Card`, `Modal`, `Drawer`, `Empty`, `Skeleton`, `Header`, `Sidebar` and `ErrorBoundary` components. Lucide supplies semantic icons; Recharts renders persisted analytics; Sonner provides live-region toasts. Dialogs support Escape/click-away, controls have labels/accessible names, keyboard focus styles are visible, destructive actions require confirmation, loading uses skeletons, and desktop/mobile navigation adapts without hiding functionality. Theme selection honors light/dark/system and widget preview reflects persisted configuration.

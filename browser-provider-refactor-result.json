@@ -1,0 +1,15 @@
+{
+  "passed": true,
+  "twoKnowledgeFiles": true,
+  "answersPresent": true,
+  "sessionPersisted": true,
+  "llmHealth": {
+    "provider": "local-extractive",
+    "type": "local",
+    "connected": true,
+    "configured": true,
+    "reachable": true,
+    "authentication": "not-required",
+    "status": "ready"
+  }
+}

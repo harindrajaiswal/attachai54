@@ -1,0 +1,50 @@
+{
+  "name": "multi-tenant-ai-backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "npm run dashboard:build && tsc -p tsconfig.json",
+    "start": "node dist/src/server.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --check .",
+    "format:fix": "prettier --write .",
+    "test": "vitest run tests --reporter=verbose",
+    "test:summary": "vitest run --reporter=json --outputFile=test-results.json",
+    "backup": "tsx scripts/backup.ts",
+    "restore": "tsx scripts/restore.ts",
+    "dashboard:build": "npm --prefix dashboard run build",
+    "dashboard:typecheck": "npm --prefix dashboard run typecheck",
+    "validate": "npm run format && npm run lint && npm run typecheck && npm test && npm run build && npm audit --audit-level=high && npm --prefix dashboard audit --audit-level=high",
+    "e2e": "npm run build && cd dashboard && npx playwright test",
+    "test:all": "npm test && npm run e2e"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.1.0",
+    "@fastify/helmet": "^13.0.2",
+    "@fastify/multipart": "^9.2.1",
+    "@fastify/rate-limit": "^10.3.0",
+    "@fastify/static": "^10.1.2",
+    "@supabase/supabase-js": "^2.112.3",
+    "@types/node": "^24.0.3",
+    "@types/nodemailer": "^6.4.17",
+    "@types/pdf-parse": "^1.1.5",
+    "dotenv": "^17.4.2",
+    "fastify": "^5.4.0",
+    "mammoth": "^1.9.1",
+    "nodemailer": "^9.0.3",
+    "pdf-parse": "^1.1.1",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4",
+    "zod": "^3.25.67"
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^8.34.1",
+    "@typescript-eslint/parser": "^8.34.1",
+    "eslint": "^9.29.0",
+    "prettier": "^3.5.3",
+    "tsx": "^4.20.3"
+  }
+}

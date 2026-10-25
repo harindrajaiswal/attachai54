@@ -1,0 +1,8 @@
+{
+  "browser": "chromium",
+  "pageLoaded": true,
+  "widgetOpened": true,
+  "chatResponse": true,
+  "sessionPersisted": true,
+  "log": "You: How long does installation take? Assistant: Standard installation takes 4 to 6 weeks after site approval."
+}

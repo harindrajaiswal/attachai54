@@ -1,0 +1,54 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      ADMIN_API_KEY: ${ADMIN_API_KEY:?set ADMIN_API_KEY}
+      DATA_DIR: /app/data
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3000}
+      VECTOR_PROVIDER: ${VECTOR_PROVIDER:-qdrant}
+      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-local}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
+      LLM_PROVIDER_TYPE: ${LLM_PROVIDER_TYPE:-local}
+      LLM_PROVIDER_NAME: ${LLM_PROVIDER_NAME:-local}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_API_KEY_ENV: ${LLM_API_KEY_ENV:-LLM_API_KEY}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      # Pass the selected secret name too (for example AZURE_OPENAI_API_KEY).
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
+      LLM_CHAT_PATH: ${LLM_CHAT_PATH:-/chat/completions}
+      LLM_HEALTH_PATH: ${LLM_HEALTH_PATH:-/models}
+      LLM_QUERY_PARAMS: '${LLM_QUERY_PARAMS:-}'
+      LLM_AUTH_HEADER_NAME: ${LLM_AUTH_HEADER_NAME:-authorization}
+      LLM_AUTH_SCHEME: ${LLM_AUTH_SCHEME-Bearer}
+      LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0}
+      LLM_TOP_P: ${LLM_TOP_P:-}
+      LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-}
+      LLM_STREAM: ${LLM_STREAM:-false}
+      LLM_TIMEOUT_MS: ${LLM_TIMEOUT_MS:-15000}
+      LLM_MAX_RETRIES: ${LLM_MAX_RETRIES:-2}
+      LLM_RETRY_BASE_MS: ${LLM_RETRY_BASE_MS:-250}
+      LLM_HEADERS: '${LLM_HEADERS:-}'
+      NOTIFICATION_PROVIDER: ${NOTIFICATION_PROVIDER:-outbox}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+    volumes: [app-data:/app/data]
+    ports: ['3000:3000']
+    depends_on: [qdrant]
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+  qdrant:
+    image: qdrant/qdrant:v1.14.1
+    restart: unless-stopped
+    volumes: [qdrant-data:/qdrant/storage]
+volumes: { app-data: {}, qdrant-data: {} }

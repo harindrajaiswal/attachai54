@@ -1,0 +1,371 @@
+--- a/src/app.ts
++++ b/src/app.ts
+@@ -18,6 +18,7 @@
+ import { ChatService } from './services/chat.js';
+ import { Metrics } from './lib/metrics.js';
+ import { AppError } from './lib/errors.js';
++import { originMatches } from './lib/security.js';
+ import { adminRoutes } from './routes/admin.js';
+ import { publicRoutes } from './routes/public.js';
+ import { systemRoutes } from './routes/system.js';
+@@ -80,13 +81,20 @@
+   await app.register(cors, {
+     delegator: (req, cb) => {
+       const origin = req.headers.origin;
+-      const publicApi = req.url === '/v1' || req.url.startsWith('/v1/');
++      const tenantOrigin =
++        typeof origin === 'string' &&
++        repo
++          .listClients()
++          .some((client) => client.enabled && originMatches(origin, repo.domains(client.id)));
+       const allowed =
+-        !origin || env.NODE_ENV !== 'production' || publicApi || env.CORS_ORIGINS.includes(origin);
++        !origin ||
++        env.NODE_ENV !== 'production' ||
++        env.CORS_ORIGINS.includes(origin) ||
++        tenantOrigin;
+       cb(null, {
+         origin: allowed,
+         methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE'],
+-        allowedHeaders: ['content-type', 'x-admin-api-key', 'x-api-key'],
++        allowedHeaders: ['content-type', 'x-admin-api-key', 'x-api-key', 'x-widget-client-id'],
+       });
+     },
+   });
+--- a/src/routes/public.ts
++++ b/src/routes/public.ts
+@@ -6,11 +6,18 @@
+ export async function publicRoutes(app: FastifyInstance, c: Context) {
+   const tenant = async (req: FastifyRequest) => {
+     const key = req.headers['x-api-key'],
++      widgetId =
++        req.headers['x-widget-client-id'] ??
++        new URL(req.url, 'http://orbit.internal').searchParams.get('clientId'),
+       origin = req.headers.origin;
+-    if (typeof key !== 'string')
+-      throw new AppError(401, 'INVALID_API_KEY', 'Valid API key required');
+-    const client = c.repo.getClientByKeyHash(hashKey(key));
+-    if (!client?.enabled) throw new AppError(401, 'INVALID_API_KEY', 'Valid API key required');
++    const client =
++      typeof key === 'string'
++        ? c.repo.getClientByKeyHash(hashKey(key))
++        : typeof widgetId === 'string'
++          ? c.repo.getClient(widgetId)
++          : undefined;
++    if (!client?.enabled)
++      throw new AppError(401, 'INVALID_API_KEY', 'Valid public client credential required');
+     if (typeof origin !== 'string' || !originMatches(origin, c.repo.domains(client.id)))
+       throw new AppError(403, 'ORIGIN_FORBIDDEN', 'Origin is not allowed');
+     (req as FastifyRequest & { tenantId: string }).tenantId = client.id;
+--- a/public/widget.js
++++ b/public/widget.js
+@@ -1,9 +1,9 @@
+ (() => {
+   const script = document.currentScript,
+-    apiKey = script?.dataset.apiKey;
+-  if (!apiKey) return;
++    clientId = script?.dataset.clientId;
++  if (!clientId || !/^[0-9a-f-]{36}$/i.test(clientId)) return;
+   const base = new URL(script.src).origin,
+-    sessionKey = `tai_session_${apiKey.slice(-8)}`;
++    sessionKey = `tai_session_${clientId}`;
+   let sessionId = localStorage.getItem(sessionKey) || undefined,
+     conversationId,
+     leadSubmitted = false;
+@@ -15,7 +15,9 @@
+   async function start() {
+     let config = {};
+     try {
+-      const r = await fetch(base + '/v1/config', { headers: { 'x-api-key': apiKey } });
++      const r = await fetch(base + '/v1/config', {
++        headers: { 'x-widget-client-id': clientId },
++      });
+       if (r.ok) config = await r.json();
+     } catch {}
+     const w = config.widget || {},
+@@ -91,7 +93,7 @@
+         try {
+           const response = await fetch(base + '/v1/leads', {
+             method: 'POST',
+-            headers: { 'content-type': 'application/json', 'x-api-key': apiKey },
++            headers: { 'content-type': 'application/json', 'x-widget-client-id': clientId },
+             body: JSON.stringify({ ...data, ...(conversationId ? { conversationId } : {}) }),
+           });
+           if (!response.ok) throw Error();
+@@ -124,7 +126,7 @@
+       try {
+         const r = await fetch(base + '/v1/chat', {
+             method: 'POST',
+-            headers: { 'content-type': 'application/json', 'x-api-key': apiKey },
++            headers: { 'content-type': 'application/json', 'x-widget-client-id': clientId },
+             body: JSON.stringify({ message: text, ...(sessionId ? { sessionId } : {}) }),
+           }),
+           j = await r.json();
+--- a/dashboard/src/main.tsx
++++ b/dashboard/src/main.tsx
+@@ -71,6 +71,7 @@
+   | 'knowledge'
+   | 'widget'
+   | 'leads'
++  | 'sessions'
+   | 'analytics'
+   | 'providers'
+   | 'system'
+@@ -82,6 +83,7 @@
+   ['knowledge', 'Knowledge', BookOpen],
+   ['widget', 'Widget', Palette],
+   ['leads', 'Leads', Users],
++  ['sessions', 'Sessions', History],
+   ['analytics', 'Analytics', ChartNoAxesCombined],
+   ['providers', 'Providers', Cloud],
+   ['system', 'System settings', Settings],
+@@ -101,10 +103,14 @@
+   });
+   if (!r.ok) {
+     let m = `Request failed (${r.status})`;
++    let payload: any;
+     try {
+-      m = (await r.json()).error.message;
++      payload = await r.json();
++      m = payload.error.message;
+     } catch {}
+-    throw new Error(m);
++    const error = new Error(m) as Error & { payload?: any };
++    error.payload = payload;
++    throw error;
+   }
+   if (r.status === 204) return undefined as T;
+   return r.json() as Promise<T>;
+@@ -354,7 +360,8 @@
+     [q, setQ] = useState(''),
+     [status, setStatus] = useState('all'),
+     [modal, setModal] = useState(false),
+-    [edit, setEdit] = useState<Client>();
++    [edit, setEdit] = useState<Client>(),
++    [copyOnce, setCopyOnce] = useState<{ clientName: string; apiKey: string }>();
+   const load = useCallback(
+     () =>
+       api<any>(`/clients?q=${encodeURIComponent(q)}&status=${status}&pageSize=100`)
+@@ -388,12 +395,26 @@
+       });
+       setModal(false);
+       load();
+-      await navigator.clipboard.writeText(r.apiKey);
+-      toast.success('Client created. API key copied (shown once).');
++      setCopyOnce({ clientName: r.client.name, apiKey: r.apiKey });
++      toast.success('Client created. Save the API key before closing the dialog.');
+     } catch (e) {
+       toast.error((e as Error).message);
+     }
+   }
++  async function rotate(c: Client) {
++    if (
++      !confirm(`Rotate the API key for ${c.name}? The previous key will stop working immediately.`)
++    )
++      return;
++    const r = await api<any>(`/clients/${c.id}/rotate-key`, { method: 'POST' });
++    setCopyOnce({ clientName: c.name, apiKey: r.apiKey });
++    load();
++  }
++  async function setKeyEnabled(c: Client, enabled: boolean) {
++    await api(`/clients/${c.id}/key/${enabled ? 'enable' : 'disable'}`, { method: 'POST' });
++    toast.success(`API key ${enabled ? 'enabled' : 'disabled'}`);
++    load();
++  }
+   async function remove(c: Client) {
+     if (!confirm(`Permanently delete ${c.name}?`)) return;
+     await api(`/clients/${c.id}`, { method: 'DELETE' });
+@@ -486,6 +507,20 @@
+                     <td>{c.apiKey?.enabled ? 'Enabled' : 'Disabled'}</td>
+                     <td className="p-4 text-right">
+                       <button
++                        aria-label="Rotate API key"
++                        className="btn secondary p-2 mr-2"
++                        onClick={() => rotate(c)}
++                      >
++                        <RefreshCw size={16} />
++                      </button>
++                      <button
++                        aria-label={c.apiKey?.enabled ? 'Disable API key' : 'Enable API key'}
++                        className="btn secondary p-2 mr-2"
++                        onClick={() => setKeyEnabled(c, !c.apiKey?.enabled)}
++                      >
++                        <KeyRound size={16} />
++                      </button>
++                      <button
+                         aria-label="Edit"
+                         className="btn secondary p-2 mr-2"
+                         onClick={() => setEdit(c)}
+@@ -538,7 +573,7 @@
+               Team email
+               <input name="email" type="email" className="field mt-1" />
+             </label>
+-            <button className="btn primary w-full">Create and copy API key</button>
++            <button className="btn primary w-full">Create client</button>
+           </form>
+         </Modal>
+       )}
+@@ -573,6 +608,32 @@
+           </form>
+         </Modal>
+       )}
++      {copyOnce && (
++        <Modal title="API key — shown once" onClose={() => setCopyOnce(undefined)}>
++          <p className="text-sm opacity-60 mb-3">
++            Save this key for {copyOnce.clientName}. It cannot be retrieved after this dialog
++            closes.
++          </p>
++          <div className="flex gap-2">
++            <input
++              aria-label="API key shown once"
++              readOnly
++              type="password"
++              className="field font-mono"
++              value={copyOnce.apiKey}
++            />
++            <button
++              className="btn secondary"
++              onClick={async () => {
++                await navigator.clipboard.writeText(copyOnce.apiKey);
++                toast.success('API key copied');
++              }}
++            >
++              <Copy size={16} /> Copy
++            </button>
++          </div>
++        </Modal>
++      )}
+     </>
+   );
+ }
+@@ -592,7 +653,7 @@
+   const [prompt, setPrompt] = useState(client?.prompt || ''),
+     [history, setHistory] = useState<any[]>([]),
+     [saved, setSaved] = useState(true),
+-    [preview, setPreview] = useState('');
++    [preview, setPreview] = useState<any>();
+   useEffect(() => {
+     setPrompt(client?.prompt || '');
+     if (client) api(`/clients/${client.id}/prompts/history`).then(setHistory);
+@@ -620,11 +681,20 @@
+   async function test(e: React.FormEvent<HTMLFormElement>) {
+     e.preventDefault();
+     const q = String(new FormData(e.currentTarget).get('q'));
+-    const r = await api<any>(`/clients/${client!.id}/prompts/preview`, {
+-      method: 'POST',
+-      body: JSON.stringify({ question: q, prompt }),
+-    });
+-    setPreview(r.answer);
++    try {
++      const r = await api<any>(`/clients/${client!.id}/prompts/preview`, {
++        method: 'POST',
++        body: JSON.stringify({ question: q, prompt }),
++      });
++      setPreview(r);
++    } catch (error) {
++      const e = error as Error & { payload?: any };
++      setPreview({
++        status: 'provider_error',
++        error: e.message,
++        retrieval: e.payload?.error?.details?.retrieval,
++      });
++    }
+   }
+   return (
+     <NeedClient client={client}>
+@@ -682,7 +752,16 @@
+               <button className="btn primary mt-3 w-full">Run preview</button>
+             </form>
+             {preview && (
+-              <div className="mt-4 text-sm p-3 rounded-xl bg-violet-500/8">{preview}</div>
++              <div className="mt-4 text-sm p-3 rounded-xl bg-violet-500/8 space-y-2">
++                <div className="text-xs uppercase tracking-wide opacity-50">{preview.status}</div>
++                <div>{preview.answer || preview.error}</div>
++                <div className="text-xs opacity-60">
++                  Retrieved {preview.retrieval?.count ?? 0} chunk(s)
++                  {preview.retrieval?.sources
++                    ?.map((x: any) => ` · ${x.source} (${x.score})`)
++                    .join('')}
++                </div>
++              </div>
+             )}
+           </div>
+           <div className="card p-5">
+@@ -1180,6 +1259,68 @@
+     </NeedClient>
+   );
+ }
++function Sessions({ client }: { client?: Client }) {
++  const [items, setItems] = useState<any[]>([]),
++    [detail, setDetail] = useState<any>();
++  useEffect(() => {
++    setDetail(undefined);
++    if (client) api(`/clients/${client.id}/conversations`).then(setItems);
++  }, [client]);
++  async function open(id: string) {
++    setDetail(await api(`/clients/${client!.id}/conversations/${id}`));
++  }
++  return (
++    <NeedClient client={client}>
++      <Header title="Sessions" sub={`Tenant-scoped conversation history for ${client?.name}`} />
++      <div className="grid xl:grid-cols-[.8fr_1.2fr] gap-5">
++        <div className="card p-4">
++          {items.length ? (
++            items.map((x) => (
++              <button
++                key={x.id}
++                className="w-full text-left p-3 rounded-xl hover:bg-violet-500/8"
++                onClick={() => open(x.id)}
++              >
++                <div className="font-medium">
++                  {x.messageCount} messages · {x.leadCount} leads
++                </div>
++                <div className="text-xs opacity-45 mt-1">
++                  {new Date(x.lastMessageAt || x.createdAt).toLocaleString()}
++                </div>
++              </button>
++            ))
++          ) : (
++            <Empty
++              title="No sessions yet"
++              body="Public and widget conversations will appear here."
++            />
++          )}
++        </div>
++        <div className="card p-5">
++          {detail ? (
++            <div className="space-y-3">
++              <div className="text-xs opacity-45">Session {detail.session_id}</div>
++              {detail.messages.map((m: any, i: number) => (
++                <div
++                  key={i}
++                  className={`p-3 rounded-xl text-sm ${m.role === 'user' ? 'bg-violet-500/10' : 'bg-black/5 dark:bg-white/5'}`}
++                >
++                  <div className="text-xs uppercase opacity-45 mb-1">{m.role}</div>
++                  {m.content}
++                </div>
++              ))}
++            </div>
++          ) : (
++            <Empty
++              title="Select a session"
++              body="Choose a tenant conversation to inspect its history."
++            />
++          )}
++        </div>
++      </div>
++    </NeedClient>
++  );
++}
+ function Analytics({ client }: { client?: Client }) {
+   const [d, setD] = useState<any>(),
+     [period, setPeriod] = useState('daily');
+@@ -1535,6 +1676,8 @@
+       <Widget client={selected} refresh={refresh} />
+     ) : page === 'leads' ? (
+       <Leads client={selected} />
++    ) : page === 'sessions' ? (
++      <Sessions client={selected} />
+     ) : page === 'analytics' ? (
+       <Analytics client={selected} />
+     ) : page === 'providers' ? (

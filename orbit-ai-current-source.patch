@@ -1,0 +1,747 @@
+diff --git a/dashboard/eslint.config.js b/dashboard/eslint.config.js
+new file mode 100644
+index 0000000..17af7a0
+--- /dev/null
++++ b/dashboard/eslint.config.js
+@@ -0,0 +1,13 @@
++import tseslint from 'typescript-eslint';
++
++export default tseslint.config({
++  files: ['src/**/*.{ts,tsx}'],
++  extends: [...tseslint.configs.recommended],
++  rules: {
++    '@typescript-eslint/no-explicit-any': 'off',
++    '@typescript-eslint/no-unused-vars': [
++      'error',
++      { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
++    ],
++  },
++});
+diff --git a/dashboard/src/main.tsx b/dashboard/src/main.tsx
+index 3908f25..8764d07 100644
+--- a/dashboard/src/main.tsx
++++ b/dashboard/src/main.tsx
+@@ -49,7 +49,6 @@ import {
+   History,
+   RotateCcw,
+   Eye,
+-  MoreHorizontal,
+ } from 'lucide-react';
+ import './index.css';
+ 
+@@ -88,7 +87,7 @@ const nav: [Page, string, React.ElementType][] = [
+   ['system', 'System settings', Settings],
+   ['health', 'Health', Activity],
+ ];
+-let key = () => sessionStorage.getItem('orbit.adminKey') || '';
++const key = () => sessionStorage.getItem('orbit.adminKey') || '';
+ async function api<T = any>(path: string, init: RequestInit = {}) {
+   const r = await fetch('/admin' + path, {
+     ...init,
+@@ -345,7 +344,7 @@ function Header({ title, sub, action }: { title: string; sub: string; action?: R
+   );
+ }
+ function Clients({
+-  selected,
++  selected: _selected,
+   setSelected,
+ }: {
+   selected?: Client;
+@@ -1185,7 +1184,7 @@ function Analytics({ client }: { client?: Client }) {
+   const [d, setD] = useState<any>(),
+     [period, setPeriod] = useState('daily');
+   useEffect(() => {
+-    client && api(`/clients/${client.id}/analytics?period=${period}`).then(setD);
++    if (client) api(`/clients/${client.id}/analytics?period=${period}`).then(setD);
+   }, [client, period]);
+   return (
+     <NeedClient client={client}>
+@@ -1294,15 +1293,14 @@ function Providers() {
+         method: 'POST',
+         body: JSON.stringify(form),
+       });
+-      x.connected
+-        ? toast.success(`Connected to ${x.provider}`)
+-        : toast.error(`Test failed: ${x.status}`);
++      if (x.connected) toast.success(`Connected to ${x.provider}`);
++      else toast.error(`Test failed: ${x.status}`);
+     } catch (e) {
+       toast.error((e as Error).message);
+     }
+   }
+   async function save() {
+-    const { apiKey, ...safe } = form;
++    const { apiKey: _apiKey, ...safe } = form;
+     await api('/settings/provider', { method: 'PUT', body: JSON.stringify(safe) });
+     toast.success('Non-secret settings staged. Restart required.');
+   }
+@@ -1412,7 +1410,6 @@ function System() {
+     api('/settings/system').then(setD);
+   }, []);
+   if (!d) return <Skeleton />;
+-  const groups: [[string, any, React.ElementType]][] = [] as any;
+   const rows: [string, any, React.ElementType][] = [
+     ['General', d.general, Settings],
+     ['SMTP', d.smtp, Mail],
+diff --git a/public/widget.js b/public/widget.js
+index a923d02..a713fe2 100644
+--- a/public/widget.js
++++ b/public/widget.js
+@@ -4,7 +4,9 @@
+   if (!apiKey) return;
+   const base = new URL(script.src).origin,
+     sessionKey = `tai_session_${apiKey.slice(-8)}`;
+-  let sessionId = localStorage.getItem(sessionKey) || undefined;
++  let sessionId = localStorage.getItem(sessionKey) || undefined,
++    conversationId,
++    leadSubmitted = false;
+   const esc = (s) =>
+     String(s || '').replace(
+       /[&<>"']/g,
+@@ -23,7 +25,7 @@
+     const root = document.createElement('div');
+     root.id = 'tenant-ai-widget';
+     const icon = { chat: '●', sparkles: '✦', help: '?' }[w.icon] || '●';
+-    root.innerHTML = `<button class="tai-launch" aria-label="Open ${esc(w.assistantName || config.assistantName || 'assistant')}">${icon}</button><section hidden role="dialog" aria-label="Chat assistant"><header>${w.logoUrl ? `<img src="${esc(w.logoUrl)}" alt="">` : ''}${w.avatarUrl ? `<img src="${esc(w.avatarUrl)}" alt="">` : ''}<div><b>${esc(w.assistantName || config.assistantName || 'Assistant')}</b><small>Online</small></div><button class="tai-close" aria-label="Close assistant">×</button></header><div class="tai-log" aria-live="polite"><p>${esc(w.welcomeMessage || config.welcomeMessage || 'How can I help?')}</p>${(w.suggestedQuestions || []).map((q) => `<button class="tai-q">${esc(q)}</button>`).join('')}</div><form><input aria-label="Message" placeholder="Type your message…" maxlength="4000" required><button aria-label="Send">➤</button></form></section>`;
++    root.innerHTML = `<button class="tai-launch" aria-label="Open ${esc(w.assistantName || config.assistantName || 'assistant')}">${icon}</button><section hidden role="dialog" aria-label="Chat assistant"><header>${w.logoUrl ? `<img src="${esc(w.logoUrl)}" alt="">` : ''}${w.avatarUrl ? `<img src="${esc(w.avatarUrl)}" alt="">` : ''}<div><b>${esc(w.assistantName || config.assistantName || 'Assistant')}</b><small>Online</small></div><button class="tai-close" aria-label="Close assistant">×</button></header><div class="tai-log" aria-live="polite"><p>${esc(w.welcomeMessage || config.welcomeMessage || 'How can I help?')}</p>${(w.suggestedQuestions || []).map((q) => `<button class="tai-q">${esc(q)}</button>`).join('')}</div><form class="tai-chat"><input aria-label="Message" placeholder="Type your message…" maxlength="4000" required><button aria-label="Send">➤</button></form></section>`;
+     const side = (w.position || theme.position) === 'bottom-left' ? 'left' : 'right';
+     Object.assign(root.style, {
+       position: 'fixed',
+@@ -37,13 +39,74 @@
+       '--tai-radius': `${w.radius ?? theme.radius ?? 18}px`,
+     });
+     const style = document.createElement('style');
+-    style.textContent = `#tenant-ai-widget *{box-sizing:border-box}#tenant-ai-widget .tai-launch{width:56px;height:56px;border:0;border-radius:50%;background:var(--tai-color);color:white;font-size:20px;box-shadow:0 12px 30px #0004;cursor:pointer;float:right}#tenant-ai-widget section{position:absolute;bottom:70px;${side}:0;width:min(${w.width || 360}px,calc(100vw - 32px));height:min(${w.height || 520}px,calc(100vh - 110px));border-radius:var(--tai-radius);overflow:hidden;background:var(--tai-bg);color:var(--tai-fg);box-shadow:0 24px 80px #0005;flex-direction:column;border:1px solid #8883}#tenant-ai-widget section:not([hidden]){display:flex}#tenant-ai-widget header{display:flex;align-items:center;gap:10px;padding:15px;background:var(--tai-color);color:#fff}#tenant-ai-widget header img{width:32px;height:32px;border-radius:50%;object-fit:cover}#tenant-ai-widget header div{flex:1}#tenant-ai-widget small{display:block;opacity:.7}#tenant-ai-widget .tai-close{border:0;background:none;color:white;font-size:24px;cursor:pointer}#tenant-ai-widget .tai-log{flex:1;overflow:auto;padding:16px;white-space:pre-wrap;font-size:14px}#tenant-ai-widget .tai-log p{background:#8882;padding:11px;border-radius:12px}#tenant-ai-widget .tai-q{border:1px solid var(--tai-color);color:var(--tai-color);background:transparent;border-radius:20px;padding:7px;margin:3px;cursor:pointer}#tenant-ai-widget form{display:flex;padding:10px;border-top:1px solid #8883}#tenant-ai-widget input{flex:1;border:0;background:transparent;color:inherit;padding:10px;outline:none}#tenant-ai-widget form button{border:0;background:var(--tai-color);color:#fff;border-radius:10px;width:40px}`;
++    style.textContent = `#tenant-ai-widget *{box-sizing:border-box}#tenant-ai-widget .tai-launch{width:56px;height:56px;border:0;border-radius:50%;background:var(--tai-color);color:white;font-size:20px;box-shadow:0 12px 30px #0004;cursor:pointer;float:right}#tenant-ai-widget section{position:absolute;bottom:70px;${side}:0;width:min(${w.width || 360}px,calc(100vw - 32px));height:min(${w.height || 520}px,calc(100vh - 110px));border-radius:var(--tai-radius);overflow:hidden;background:var(--tai-bg);color:var(--tai-fg);box-shadow:0 24px 80px #0005;flex-direction:column;border:1px solid #8883}#tenant-ai-widget section:not([hidden]){display:flex}#tenant-ai-widget header{display:flex;align-items:center;gap:10px;padding:15px;background:var(--tai-color);color:#fff}#tenant-ai-widget header img{width:32px;height:32px;border-radius:50%;object-fit:cover}#tenant-ai-widget header div{flex:1}#tenant-ai-widget small{display:block;opacity:.7}#tenant-ai-widget .tai-close{border:0;background:none;color:white;font-size:24px;cursor:pointer}#tenant-ai-widget .tai-log{flex:1;overflow:auto;padding:16px;white-space:pre-wrap;font-size:14px}#tenant-ai-widget .tai-log p{background:#8882;padding:11px;border-radius:12px}#tenant-ai-widget .tai-q{border:1px solid var(--tai-color);color:var(--tai-color);background:transparent;border-radius:20px;padding:7px;margin:3px;cursor:pointer}#tenant-ai-widget .tai-chat{display:flex;padding:10px;border-top:1px solid #8883}#tenant-ai-widget .tai-chat input{flex:1;border:0;background:transparent;color:inherit;padding:10px;outline:none}#tenant-ai-widget form button{border:0;background:var(--tai-color);color:#fff;border-radius:10px;padding:9px 12px}#tenant-ai-widget .tai-lead{display:grid;gap:7px;background:#8882;padding:11px;border-radius:12px;white-space:normal}#tenant-ai-widget .tai-lead input,#tenant-ai-widget .tai-lead textarea{width:100%;border:1px solid #8885;border-radius:7px;background:var(--tai-bg);color:var(--tai-fg);padding:8px;font:inherit}#tenant-ai-widget .tai-status{font-size:12px}`;
+     document.head.append(style);
+     const section = root.querySelector('section'),
+       launch = root.querySelector('.tai-launch'),
+       close = root.querySelector('.tai-close'),
+-      input = root.querySelector('input'),
++      input = root.querySelector('.tai-chat input'),
+       log = root.querySelector('.tai-log');
++    const addLine = (speaker, text) => {
++      const p = document.createElement('p');
++      p.textContent = `${speaker}: ${text}`;
++      log.append(p);
++    };
++    const showLeadForm = (fields) => {
++      if (leadSubmitted || log.querySelector('.tai-lead')) return;
++      const allowed = ['name', 'email', 'phone', 'requirement'],
++        selected = [...new Set(['name', ...(Array.isArray(fields) ? fields : [])])].filter((x) =>
++          allowed.includes(x),
++        ),
++        form = document.createElement('form');
++      form.className = 'tai-lead';
++      form.setAttribute('aria-label', 'Contact details');
++      const labels = {
++        name: 'Name',
++        email: 'Email',
++        phone: 'Phone',
++        requirement: 'How can we help?',
++      };
++      selected.forEach((field) => {
++        const control = document.createElement(field === 'requirement' ? 'textarea' : 'input');
++        control.name = field;
++        control.setAttribute('aria-label', labels[field]);
++        control.placeholder = labels[field];
++        control.maxLength = field === 'requirement' ? 2000 : field === 'phone' ? 40 : 120;
++        if (field === 'name') control.required = true;
++        if (field === 'email') control.type = 'email';
++        form.append(control);
++      });
++      const button = document.createElement('button');
++      button.type = 'submit';
++      button.textContent = 'Send details';
++      const status = document.createElement('div');
++      status.className = 'tai-status';
++      status.setAttribute('role', 'status');
++      form.append(button, status);
++      form.onsubmit = async (event) => {
++        event.preventDefault();
++        button.disabled = true;
++        status.textContent = 'Sending…';
++        const data = Object.fromEntries(new FormData(form).entries());
++        try {
++          const response = await fetch(base + '/v1/leads', {
++            method: 'POST',
++            headers: { 'content-type': 'application/json', 'x-api-key': apiKey },
++            body: JSON.stringify({ ...data, ...(conversationId ? { conversationId } : {}) }),
++          });
++          if (!response.ok) throw Error();
++          leadSubmitted = true;
++          form
++            .querySelectorAll('input,textarea,button')
++            .forEach((control) => (control.disabled = true));
++          status.textContent = 'Thanks — your details were sent.';
++        } catch {
++          button.disabled = false;
++          status.textContent = 'Unable to send. Please check your details and try again.';
++        }
++      };
++      log.append(form);
++    };
+     launch.onclick = () => (section.hidden = !section.hidden);
+     close.onclick = () => (section.hidden = true);
+     root.querySelectorAll('.tai-q').forEach(
+@@ -53,11 +116,11 @@
+           input.focus();
+         }),
+     );
+-    root.querySelector('form').onsubmit = async (e) => {
++    root.querySelector('.tai-chat').onsubmit = async (e) => {
+       e.preventDefault();
+       const text = input.value;
+       input.value = '';
+-      log.textContent += '\nYou: ' + text;
++      addLine('You', text);
+       try {
+         const r = await fetch(base + '/v1/chat', {
+             method: 'POST',
+@@ -67,10 +130,12 @@
+           j = await r.json();
+         if (!r.ok) throw Error();
+         sessionId = j.sessionId;
++        conversationId = j.conversationId;
+         localStorage.setItem(sessionKey, sessionId);
+-        log.textContent += '\nAssistant: ' + j.answer;
++        addLine('Assistant', j.answer);
++        if (j.leadCollection?.enabled) showLeadForm(j.leadCollection.fields);
+       } catch {
+-        log.textContent += '\nAssistant: Unable to connect.';
++        addLine('Assistant', 'Unable to connect.');
+       }
+       log.scrollTop = log.scrollHeight;
+     };
+diff --git a/src/app.ts b/src/app.ts
+index 28a401c..341e944 100644
+--- a/src/app.ts
++++ b/src/app.ts
+@@ -78,13 +78,17 @@ export async function buildApp(env: Env) {
+   };
+   await app.register(helmet, { contentSecurityPolicy: false });
+   await app.register(cors, {
+-    origin: (origin, cb) => {
+-      if (!origin || env.NODE_ENV !== 'production' || env.CORS_ORIGINS.includes(origin))
+-        cb(null, true);
+-      else cb(null, false);
++    delegator: (req, cb) => {
++      const origin = req.headers.origin;
++      const publicApi = req.url === '/v1' || req.url.startsWith('/v1/');
++      const allowed =
++        !origin || env.NODE_ENV !== 'production' || publicApi || env.CORS_ORIGINS.includes(origin);
++      cb(null, {
++        origin: allowed,
++        methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE'],
++        allowedHeaders: ['content-type', 'x-admin-api-key', 'x-api-key'],
++      });
+     },
+-    methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE'],
+-    allowedHeaders: ['content-type', 'x-admin-api-key', 'x-api-key'],
+   });
+   await app.register(rateLimit, {
+     max: 100,
+@@ -92,7 +96,14 @@ export async function buildApp(env: Env) {
+     keyGenerator: (req) => req.ip,
+   });
+   await app.register(multipart, { limits: { fileSize: 10 * 1024 * 1024, files: 10, parts: 15 } });
+-  await app.register(staticPlugin, { root: path.resolve('public'), prefix: '/' });
++  await app.register(staticPlugin, {
++    root: path.resolve('public'),
++    prefix: '/',
++    setHeaders: (response, filePath) => {
++      if (path.basename(filePath) === 'widget.js')
++        response.header('Cross-Origin-Resource-Policy', 'cross-origin');
++    },
++  });
+   app.addHook('onRequest', async (req) => {
+     (req as typeof req & { startedAt: number }).startedAt = Date.now();
+   });
+diff --git a/src/domain/types.ts b/src/domain/types.ts
+index 5a4eb80..1a3f0e8 100644
+--- a/src/domain/types.ts
++++ b/src/domain/types.ts
+@@ -69,4 +69,4 @@ export type ProviderHealth = {
+   baseUrl?: string;
+ };
+ export type ChatMessage = { role: 'user' | 'assistant'; content: string };
+-export type RetrievedChunk = { text: string; source: string; score: number };
++export type RetrievedChunk = { id: string; text: string; source: string; score: number };
+diff --git a/src/providers/vector.ts b/src/providers/vector.ts
+index 94aa3e2..77e7a95 100644
+--- a/src/providers/vector.ts
++++ b/src/providers/vector.ts
+@@ -37,7 +37,7 @@ export class LocalVector implements VectorProvider {
+   async search(c: string, v: number[], k: number, min: number) {
+     return this.rows
+       .filter((x) => x.clientId === c)
+-      .map((x) => ({ text: x.text, source: x.source, score: cosine(x.embedding, v) }))
++      .map((x) => ({ id: x.id, text: x.text, source: x.source, score: cosine(x.embedding, v) }))
+       .filter((x) => x.score >= min)
+       .sort((a, b) => b.score - a.score)
+       .slice(0, k);
+@@ -115,9 +115,9 @@ export class QdrantVector implements VectorProvider {
+     });
+     if (!r.ok) throw new Error(`Qdrant search failed (${r.status})`);
+     const j = (await r.json()) as {
+-      result: { score: number; payload: { text: string; source: string } }[];
++      result: { id: string | number; score: number; payload: { text: string; source: string } }[];
+     };
+-    return j.result.map((x) => ({ ...x.payload, score: x.score }));
++    return j.result.map((x) => ({ id: String(x.id), ...x.payload, score: x.score }));
+   }
+   async deleteTenant(c: string) {
+     await fetch(`${this.url}/collections/tenant_knowledge/points/delete?wait=true`, {
+diff --git a/src/repositories/sqlite.ts b/src/repositories/sqlite.ts
+index bd5cb4a..7399fee 100644
+--- a/src/repositories/sqlite.ts
++++ b/src/repositories/sqlite.ts
+@@ -265,14 +265,25 @@ CREATE TABLE IF NOT EXISTS lead_workflow(lead_id TEXT PRIMARY KEY,status TEXT NO
+       )
+       .get();
+   }
+-  conversation(id: string) {
+-    const c = this.db.prepare('SELECT * FROM conversations WHERE id=?').get(id);
+-    return c ? { ...c, messages: this.messages(id) } : undefined;
++  conversationForClient(clientId: string, id: string) {
++    const conversation = this.db
++      .prepare('SELECT * FROM conversations WHERE id=? AND client_id=?')
++      .get(id, clientId);
++    return conversation ? { ...conversation, messages: this.messages(id) } : undefined;
+   }
+-  updateLead(id: string, data: { status?: string; assignee?: string | null; notes?: string }) {
+-    const lead = this.db.prepare('SELECT id FROM leads WHERE id=?').get(id);
++  updateLead(
++    clientId: string,
++    id: string,
++    data: { status?: string; assignee?: string | null; notes?: string },
++  ) {
++    const lead = this.db
++      .prepare('SELECT id FROM leads WHERE id=? AND client_id=?')
++      .get(id, clientId);
+     if (!lead) return false;
+-    if (data.status) this.db.prepare('UPDATE leads SET status=? WHERE id=?').run(data.status, id);
++    if (data.status)
++      this.db
++        .prepare('UPDATE leads SET status=? WHERE id=? AND client_id=?')
++        .run(data.status, id, clientId);
+     this.db
+       .prepare(
+         `INSERT INTO lead_workflow(lead_id,status,assignee,notes,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(lead_id) DO UPDATE SET status=excluded.status,assignee=excluded.assignee,notes=excluded.notes,updated_at=excluded.updated_at`,
+diff --git a/src/routes/admin.ts b/src/routes/admin.ts
+index 243bbed..a005cd3 100644
+--- a/src/routes/admin.ts
++++ b/src/routes/admin.ts
+@@ -225,6 +225,14 @@ export async function adminRoutes(app: FastifyInstance, c: Context) {
+         source: chunk.source,
+         score: Math.round(chunk.score * 1000) / 1000,
+       })),
++      retrieval: {
++        count: context.length,
++        sources: context.map((chunk) => ({
++          chunkId: chunk.id,
++          source: chunk.source,
++          score: Math.round(chunk.score * 1000) / 1000,
++        })),
++      },
+     };
+   });
+   app.post('/clients/:id/prompt', async (req) => {
+@@ -304,7 +312,7 @@ export async function adminRoutes(app: FastifyInstance, c: Context) {
+     const { id } = idParams.parse(req.params),
+       { leadId } = z.object({ leadId: z.string().uuid() }).parse(req.params),
+       body = leadPatch.parse(req.body);
+-    if (!c.repo.getClient(id) || !c.repo.updateLead(leadId, body))
++    if (!c.repo.getClient(id) || !c.repo.updateLead(id, leadId, body))
+       throw new AppError(404, 'NOT_FOUND', 'Lead not found');
+     c.repo.audit(id, 'lead.updated', { leadId, fields: Object.keys(body) });
+     return { updated: true };
+@@ -316,7 +324,9 @@ export async function adminRoutes(app: FastifyInstance, c: Context) {
+     if (!lead) throw new AppError(404, 'NOT_FOUND', 'Lead not found');
+     return {
+       ...lead,
+-      conversation: lead.conversationId ? c.repo.conversation(lead.conversationId) : null,
++      conversation: lead.conversationId
++        ? (c.repo.conversationForClient(id, lead.conversationId) ?? null)
++        : null,
+     };
+   });
+   app.get('/clients/:id/leads.csv', async (req, reply) => {
+diff --git a/src/routes/public.ts b/src/routes/public.ts
+index 2fc03f8..6dc18cf 100644
+--- a/src/routes/public.ts
++++ b/src/routes/public.ts
+@@ -37,6 +37,8 @@ export async function publicRoutes(app: FastifyInstance, c: Context) {
+     const b = leadSchema.parse(req.body);
+     const tid = (req as FastifyRequest & { tenantId: string }).tenantId;
+     const { conversationId, ...data } = b;
++    if (conversationId && !c.repo.conversationForClient(tid, conversationId))
++      throw new AppError(404, 'CONVERSATION_NOT_FOUND', 'Conversation not found');
+     const id = c.repo.saveLead(tid, conversationId, data as Record<string, string>);
+     const client = c.repo.getClient(tid)!;
+     await c.notification.notify(
+diff --git a/src/services/chat.ts b/src/services/chat.ts
+index 4274785..3783d6e 100644
+--- a/src/services/chat.ts
++++ b/src/services/chat.ts
+@@ -37,9 +37,21 @@ export class ChatService {
+       sessionId: sid,
+       conversationId: cid,
+       answer,
+-      sources: found.map((x) => ({ source: x.source, score: Math.round(x.score * 1000) / 1000 })),
++      sources: found.map((x) => ({
++        chunkId: x.id,
++        source: x.source,
++        score: Math.round(x.score * 1000) / 1000,
++      })),
+       leadCollection: client.config.collectLead
+-        ? { enabled: true, fields: client.config.leadFields ?? ['name', 'email', 'requirement'] }
++        ? {
++            enabled: true,
++            fields: [
++              'name',
++              ...(client.config.leadFields ?? ['email', 'requirement']).filter(
++                (field) => field !== 'name',
++              ),
++            ],
++          }
+         : undefined,
+     };
+   }
+diff --git a/tests/llm-provider.test.ts b/tests/llm-provider.test.ts
+index a355992..d5a9617 100644
+--- a/tests/llm-provider.test.ts
++++ b/tests/llm-provider.test.ts
+@@ -17,7 +17,7 @@ const answerInput = {
+   question: 'What?',
+   prompt: 'safe',
+   config: { assistantName: 'a', fallbackMessage: 'no' },
+-  context: [{ text: 'Known answer.', source: 'one.txt', score: 1 }],
++  context: [{ id: 'chunk-1', text: 'Known answer.', source: 'one.txt', score: 1 }],
+ };
+ describe('generic LLM provider configuration and adapter', () => {
+   it('defaults to deterministic local configuration', async () => {
+diff --git a/tests/production-readiness.test.ts b/tests/production-readiness.test.ts
+new file mode 100644
+index 0000000..6afe4d8
+--- /dev/null
++++ b/tests/production-readiness.test.ts
+@@ -0,0 +1,318 @@
++import { afterAll, beforeAll, describe, expect, it } from 'vitest';
++import fs from 'node:fs/promises';
++import os from 'node:os';
++import path from 'node:path';
++import { buildApp } from '../src/app.js';
++import { loadEnv } from '../src/config/env.js';
++
++const adminKey = 'production-readiness-admin-key';
++const adminHeaders = { 'x-admin-api-key': adminKey };
++const northstarOrigin = 'https://northstar.example';
++const brightSmileOrigin = 'https://brightsmile.example';
++let app: Awaited<ReturnType<typeof buildApp>>;
++let dataDir: string;
++let northstarId = '';
++let northstarKey = '';
++let brightSmileId = '';
++let brightSmileKey = '';
++let northstarConversationId = '';
++let brightSmileConversationId = '';
++let northstarLeadId = '';
++
++function multipart(filename: string, text: string) {
++  const boundary = '----productionreadiness';
++  return {
++    headers: { ...adminHeaders, 'content-type': `multipart/form-data; boundary=${boundary}` },
++    payload: `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\nContent-Type: text/plain\r\n\r\n${text}\r\n--${boundary}--\r\n`,
++  };
++}
++
++async function createTenant(name: string, slug: string, domain: string, fallbackMessage: string) {
++  const response = await app.inject({
++    method: 'POST',
++    url: '/admin/clients',
++    headers: adminHeaders,
++    payload: {
++      name,
++      slug,
++      domains: [domain],
++      prompt: `Answer only from ${name} knowledge.`,
++      config: {
++        assistantName: `${name} Assistant`,
++        fallbackMessage,
++        collectLead: true,
++        leadFields: ['email', 'requirement'],
++        minSimilarity: 0.999,
++      },
++    },
++  });
++  expect(response.statusCode).toBe(200);
++  return response.json() as { client: { id: string }; apiKey: string };
++}
++
++beforeAll(async () => {
++  dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'orbit-production-readiness-'));
++  app = await buildApp(
++    loadEnv({
++      NODE_ENV: 'production',
++      ADMIN_API_KEY: adminKey,
++      DATA_DIR: dataDir,
++      PUBLIC_BASE_URL: 'https://orbit.example',
++      CORS_ORIGINS: 'https://dashboard.example',
++    }),
++  );
++  await app.ready();
++  const northstar = await createTenant(
++    'Northstar Solar',
++    'northstar-solar',
++    'northstar.example',
++    'Not found in Northstar knowledge.',
++  );
++  northstarId = northstar.client.id;
++  northstarKey = northstar.apiKey;
++  const brightSmile = await createTenant(
++    'BrightSmile Dental',
++    'brightsmile-dental',
++    'brightsmile.example',
++    'Not found in BrightSmile knowledge.',
++  );
++  brightSmileId = brightSmile.client.id;
++  brightSmileKey = brightSmile.apiKey;
++  await app.inject({
++    method: 'POST',
++    url: `/admin/clients/${northstarId}/knowledge`,
++    ...multipart(
++      'northstar.txt',
++      'Northstar Solar installs HelioPeak panels with a 27-year warranty.',
++    ),
++  });
++  await app.inject({
++    method: 'POST',
++    url: `/admin/clients/${brightSmileId}/knowledge`,
++    ...multipart(
++      'brightsmile.txt',
++      'BrightSmile Dental offers CometClean appointments on Saturday mornings.',
++    ),
++  });
++});
++
++afterAll(async () => {
++  await app.close();
++  await fs.rm(dataDir, { recursive: true, force: true });
++});
++
++describe('two-tenant production-readiness regressions', () => {
++  it('allows tenant-authorized public CORS without opening admin CORS', async () => {
++    const preflight = await app.inject({
++      method: 'OPTIONS',
++      url: '/v1/chat',
++      headers: {
++        origin: northstarOrigin,
++        'access-control-request-method': 'POST',
++        'access-control-request-headers': 'content-type,x-api-key',
++      },
++    });
++    expect(preflight.statusCode).toBe(204);
++    expect(preflight.headers['access-control-allow-origin']).toBe(northstarOrigin);
++
++    const forbidden = await app.inject({
++      method: 'POST',
++      url: '/v1/chat',
++      headers: { origin: 'https://attacker.example', 'x-api-key': northstarKey },
++      payload: { message: 'Northstar Solar installs HelioPeak panels with a 27-year warranty.' },
++    });
++    expect(forbidden.statusCode).toBe(403);
++
++    const adminResponse = await app.inject({
++      url: '/admin/clients',
++      headers: { ...adminHeaders, origin: 'https://attacker.example' },
++    });
++    expect(adminResponse.headers['access-control-allow-origin']).toBeUndefined();
++  });
++
++  it('uses tenant-scoped RAG in prompt preview with safe zero-context evidence', async () => {
++    const positive = await app.inject({
++      method: 'POST',
++      url: `/admin/clients/${northstarId}/prompts/preview`,
++      headers: adminHeaders,
++      payload: {
++        question: 'Northstar Solar installs HelioPeak panels with a 27-year warranty.',
++        prompt: 'Use only Northstar Solar context.',
++      },
++    });
++    expect(positive.statusCode).toBe(200);
++    expect(positive.json().answer).toContain('HelioPeak');
++    expect(positive.json().retrieval.count).toBe(1);
++    expect(positive.json().retrieval.sources[0]).toMatchObject({ source: 'northstar.txt' });
++    expect(positive.json().retrieval.sources[0].chunkId).toEqual(expect.any(String));
++    expect(positive.json().retrieval.sources[0].score).toBe(1);
++
++    const unrelated = await app.inject({
++      method: 'POST',
++      url: `/admin/clients/${northstarId}/prompts/preview`,
++      headers: adminHeaders,
++      payload: {
++        question: 'BrightSmile Dental offers CometClean appointments on Saturday mornings.',
++        prompt: 'Use only Northstar Solar context.',
++      },
++    });
++    expect(unrelated.json()).toMatchObject({
++      answer: 'Not found in Northstar knowledge.',
++      retrieval: { count: 0, sources: [] },
++    });
++
++    const reverse = await app.inject({
++      method: 'POST',
++      url: `/admin/clients/${brightSmileId}/prompts/preview`,
++      headers: adminHeaders,
++      payload: {
++        question: 'Northstar Solar installs HelioPeak panels with a 27-year warranty.',
++        prompt: 'Use only BrightSmile Dental context.',
++      },
++    });
++    expect(reverse.json()).toMatchObject({
++      answer: 'Not found in BrightSmile knowledge.',
++      retrieval: { count: 0, sources: [] },
++    });
++  });
++
++  it('grounds public chat bidirectionally and keeps sessions tenant-scoped', async () => {
++    const northstar = await app.inject({
++      method: 'POST',
++      url: '/v1/chat',
++      headers: { origin: northstarOrigin, 'x-api-key': northstarKey },
++      payload: { message: 'Northstar Solar installs HelioPeak panels with a 27-year warranty.' },
++    });
++    expect(northstar.statusCode).toBe(200);
++    expect(northstar.json().answer).toContain('HelioPeak');
++    expect(northstar.json().sources[0]).toMatchObject({ source: 'northstar.txt', score: 1 });
++    expect(northstar.json().sources[0].chunkId).toEqual(expect.any(String));
++    expect(northstar.json().leadCollection.fields[0]).toBe('name');
++    northstarConversationId = northstar.json().conversationId;
++
++    const brightSmile = await app.inject({
++      method: 'POST',
++      url: '/v1/chat',
++      headers: { origin: brightSmileOrigin, 'x-api-key': brightSmileKey },
++      payload: {
++        message: 'BrightSmile Dental offers CometClean appointments on Saturday mornings.',
++      },
++    });
++    expect(brightSmile.json().answer).toContain('CometClean');
++    brightSmileConversationId = brightSmile.json().conversationId;
++
++    const northstarCross = await app.inject({
++      method: 'POST',
++      url: '/v1/chat',
++      headers: { origin: northstarOrigin, 'x-api-key': northstarKey },
++      payload: {
++        message: 'BrightSmile Dental offers CometClean appointments on Saturday mornings.',
++      },
++    });
++    expect(northstarCross.json().answer).toBe('Not found in Northstar knowledge.');
++
++    const brightSmileCross = await app.inject({
++      method: 'POST',
++      url: '/v1/chat',
++      headers: { origin: brightSmileOrigin, 'x-api-key': brightSmileKey },
++      payload: { message: 'Northstar Solar installs HelioPeak panels with a 27-year warranty.' },
++    });
++    expect(brightSmileCross.json().answer).toBe('Not found in BrightSmile knowledge.');
++
++    const reusedSession = await app.inject({
++      method: 'POST',
++      url: '/v1/chat',
++      headers: { origin: brightSmileOrigin, 'x-api-key': brightSmileKey },
++      payload: {
++        sessionId: northstar.json().sessionId,
++        message: 'Northstar Solar installs HelioPeak panels with a 27-year warranty.',
++      },
++    });
++    expect(reusedSession.json().answer).toBe('Not found in BrightSmile knowledge.');
++    expect(reusedSession.json().conversationId).not.toBe(northstarConversationId);
++  });
++
++  it('rejects cross-tenant conversation links and cross-tenant lead updates', async () => {
++    const crossLink = await app.inject({
++      method: 'POST',
++      url: '/v1/leads',
++      headers: { origin: northstarOrigin, 'x-api-key': northstarKey },
++      payload: { name: 'Synthetic Northstar Lead', conversationId: brightSmileConversationId },
++    });
++    expect(crossLink.statusCode).toBe(404);
++    expect(crossLink.json().error.code).toBe('CONVERSATION_NOT_FOUND');
++
++    const valid = await app.inject({
++      method: 'POST',
++      url: '/v1/leads',
++      headers: { origin: northstarOrigin, 'x-api-key': northstarKey },
++      payload: {
++        name: 'Synthetic Northstar Lead',
++        email: 'northstar.test@example.com',
++        conversationId: northstarConversationId,
++      },
++    });
++    expect(valid.statusCode).toBe(200);
++    northstarLeadId = valid.json().id;
++
++    const crossUpdate = await app.inject({
++      method: 'PATCH',
++      url: `/admin/clients/${brightSmileId}/leads/${northstarLeadId}`,
++      headers: adminHeaders,
++      payload: { status: 'won' },
++    });
++    expect(crossUpdate.statusCode).toBe(404);
++
++    const detail = await app.inject({
++      url: `/admin/clients/${northstarId}/leads/${northstarLeadId}`,
++      headers: adminHeaders,
++    });
++    expect(detail.json().conversation.client_id).toBe(northstarId);
++    expect(detail.body).not.toContain('CometClean');
++  });
++
++  it('keeps analytics tenant-specific and rotates API keys copy-once', async () => {
++    const northstarAnalytics = await app.inject({
++      url: `/admin/clients/${northstarId}/analytics`,
++      headers: adminHeaders,
++    });
++    const brightSmileAnalytics = await app.inject({
++      url: `/admin/clients/${brightSmileId}/analytics`,
++      headers: adminHeaders,
++    });
++    expect(northstarAnalytics.json().leads).toBe(1);
++    expect(brightSmileAnalytics.json().leads).toBe(0);
++
++    const rotated = await app.inject({
++      method: 'POST',
++      url: `/admin/clients/${northstarId}/rotate-key`,
++      headers: adminHeaders,
++    });
++    expect(rotated.json().copyOnce).toBe(true);
++    const newKey = rotated.json().apiKey as string;
++    expect(newKey).not.toBe(northstarKey);
++
++    const oldKeyResponse = await app.inject({
++      url: '/v1/config',
++      headers: { origin: northstarOrigin, 'x-api-key': northstarKey },
++    });
++    expect(oldKeyResponse.statusCode).toBe(401);
++    const newKeyResponse = await app.inject({
++      url: '/v1/config',
++      headers: { origin: northstarOrigin, 'x-api-key': newKey },
++    });
++    expect(newKeyResponse.statusCode).toBe(200);
++    expect(newKeyResponse.body).not.toContain(newKey);
++  });
++
++  it('serves widget lead-capture behavior without embedding key values', async () => {
++    const widget = await app.inject({ url: '/widget.js' });
++    expect(widget.statusCode).toBe(200);
++    expect(widget.headers['cross-origin-resource-policy']).toBe('cross-origin');
++    expect(widget.body).toContain("fetch(base + '/v1/leads'");
++    expect(widget.body).toContain('conversationId');
++    expect(widget.body).toContain('Thanks — your details were sent.');
++    expect(widget.body).not.toContain(northstarKey);
++    expect(widget.body).not.toContain(brightSmileKey);
++  });
++});
