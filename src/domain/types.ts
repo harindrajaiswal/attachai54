@@ -1,0 +1,72 @@
+export type ClientConfig = {
+  companyName?: string;
+  assistantName: string;
+  teamEmail?: string;
+  fallbackMessage: string;
+  welcomeMessage?: string;
+  model?: string;
+  temperature?: number;
+  language?: string;
+  collectLead?: boolean;
+  leadCollectionEnabled?: boolean;
+  leadFields?: Array<'name' | 'email' | 'phone' | 'requirement'>;
+  notificationEmail?: string;
+  notificationChannels?: Array<'email' | 'webhook'>;
+  theme?: {
+    primaryColor?: string;
+    dark?: boolean;
+    position?: 'bottom-right' | 'bottom-left';
+    logoUrl?: string;
+    avatarUrl?: string;
+    radius?: number;
+  };
+  widget?: {
+    primaryColor?: string;
+    dark?: boolean;
+    logoUrl?: string;
+    avatarUrl?: string;
+    assistantName?: string;
+    welcomeMessage?: string;
+    suggestedQuestions?: string[];
+    position?: 'bottom-right' | 'bottom-left';
+    width?: number;
+    height?: number;
+    radius?: number;
+    icon?: 'chat' | 'sparkles' | 'help';
+  };
+  widgetSettings?: { launcherLabel?: string; placeholder?: string; showBranding?: boolean };
+  analyticsSettings?: { enabled?: boolean; retainDays?: number };
+  topK?: number;
+  minSimilarity?: number;
+};
+export type Client = {
+  id: string;
+  name: string;
+  slug: string;
+  enabled: boolean;
+  config: ClientConfig;
+  prompt: string;
+  createdAt: string;
+  updatedAt: string;
+};
+export type VectorRecord = {
+  id: string;
+  clientId: string;
+  source: string;
+  text: string;
+  embedding: number[];
+};
+export type ProviderHealth = {
+  provider: string;
+  connected: boolean;
+  detail?: string;
+  type?: string;
+  configured?: boolean;
+  reachable?: boolean;
+  authentication?: 'not-required' | 'accepted' | 'rejected' | 'unknown';
+  status?: string;
+  model?: string;
+  baseUrl?: string;
+};
+export type ChatMessage = { role: 'user' | 'assistant'; content: string };
+export type RetrievedChunk = { id: string; text: string; source: string; score: number };
