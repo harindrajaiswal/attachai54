@@ -351,7 +351,7 @@ export class ChatService {
       dense.length === 0 &&
       typeof this.llm.reformulate !== 'function'
     ) {
-      const detAlt = buildAlternativeQueries(message, history)[0];
+      const detAlt = buildAlternativeQueries(message)[0];
       if (detAlt && detAlt !== message) {
         const tEmbDet = Date.now();
         const [altVec] = await this.embedding.embed([detAlt]);
