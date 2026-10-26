@@ -60,6 +60,22 @@ function tenantIdentityAnswer(question: string, config: ClientConfig) {
   return `I’m ${assistant}. I’m here to help with this tenant’s products, services, and information.`;
 }
 
+function conversationalSocialAnswer(question: string, config: ClientConfig): string | null {
+  const text = question.trim().replace(/[!?.,]+$/g, '');
+  const assistant = config.assistantName.trim();
+  const company = config.companyName?.trim();
+  if (/^(hi|hello|hey|hi there|hello there|good morning|good afternoon|good evening|how are you)$/i.test(text)) {
+    if (config.welcomeMessage?.trim()) return config.welcomeMessage.trim();
+    return company
+      ? `Hello! I’m ${assistant} for ${company}. How can I help you today?`
+      : `Hello! I’m ${assistant}. How can I help you today?`;
+  }
+  if (/^(thanks|thank you|thank you so much|thx)$/i.test(text)) {
+    return 'You’re welcome! Let me know if there is anything else I can help you with.';
+  }
+  return null;
+}
+
 export class LocalLlm implements LlmProvider {
   readonly name: string;
   constructor(private providerName = 'local') {
@@ -78,34 +94,36 @@ export class LocalLlm implements LlmProvider {
         .slice(-4)
         .map((x) => x.content)
         .join(' ');
+    const social = !i.context.length ? conversationalSocialAnswer(i.question, i.config) : null;
+    if (social) return social;
     const stop = new Set([
-      "what",
-      "which",
-      "who",
-      "how",
-      "when",
-      "where",
-      "why",
-      "does",
-      "did",
-      "can",
-      "will",
-      "are",
-      "was",
-      "were",
-      "the",
-      "and",
-      "for",
-      "with",
-      "that",
-      "this",
-      "its",
-      "your",
-      "you",
-      "our",
-      "from",
-      "have",
-      "has",
+      'what',
+      'which',
+      'who',
+      'how',
+      'when',
+      'where',
+      'why',
+      'does',
+      'did',
+      'can',
+      'will',
+      'are',
+      'was',
+      'were',
+      'the',
+      'and',
+      'for',
+      'with',
+      'that',
+      'this',
+      'its',
+      'your',
+      'you',
+      'our',
+      'from',
+      'have',
+      'has',
     ]);
     const rawTerms = new Set(
       (i.question.toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) ?? []).filter((t) => !stop.has(t)),
@@ -134,12 +152,30 @@ export class LocalLlm implements LlmProvider {
       return base > 0 ? base + histHits * 0.25 : 0;
     };
     const contextSentences = i.context
-      .flatMap((c) => c.text.split(/(?<=[.!?])\s+/))
+      .flatMap((c) => c.text.split(/(?<!\b\d+)(?<!\b[a-zA-Z])(?<=[.!?])\s+/))
       .map((s) => ({ s, hit: scoreText(s, true) }))
       .filter((x) => x.hit > 0)
       .sort((a, b) => b.hit - a.hit)
       .slice(0, 3);
-    if (contextSentences.length) return contextSentences.map((x) => x.s).join(' ');
+    if (contextSentences.length) {
+      let baseAnswer = contextSentences.map((x) => x.s).join(' ');
+      const subParts = i.question
+        .split(/\band\s+(?=(?:what|how|where|when|who|which|is|are|do|does|can)\b)/i)
+        .map((p) => p.trim())
+        .filter(Boolean);
+      if (subParts.length > 1) {
+        const allContextNorm = new Set(i.context.flatMap((c) => ragTokens(c.text)));
+        const missingParts = subParts.filter((part) => {
+          const partTerms = ragTokens(part);
+          return partTerms.length > 0 && partTerms.every((t) => !allContextNorm.has(t));
+        });
+        if (missingParts.length > 0 && missingParts.length < subParts.length) {
+          const missingTopic = ragTokens(missingParts[0]!).join(' ');
+          baseAnswer = `${baseAnswer} Information regarding ${missingTopic} is not available in the provided knowledge.`;
+        }
+      }
+      return baseAnswer;
+    }
     const historyStatements = (i.history ?? [])
       .map((x) => x.content.trim())
       .filter(
@@ -149,7 +185,7 @@ export class LocalLlm implements LlmProvider {
           s !== i.config.fallbackMessage &&
           !/I don['’]t have verified information/i.test(s),
       )
-      .flatMap((s) => s.split(/(?<=[.!?])\s+/))
+      .flatMap((s) => s.split(/(?<!\b\d+)(?<!\b[a-zA-Z])(?<=[.!?])\s+/))
       .map((s) => ({ s, hit: scoreText(s, false) }))
       .filter((x) => x.hit > 0)
       .sort((a, b) => b.hit - a.hit)
@@ -226,7 +262,7 @@ export class OpenAICompatibleLlm implements LlmProvider {
     const context = i.context
       .map((x, n) => `[Source ${n + 1}: ${x.source} | chunk ${x.id}]\n${x.text}`)
       .join('\n\n');
-    const policy = `${tenantIdentityPolicy(i.config)}\n${i.prompt}\nStrict grounding policy: For tenant-specific factual questions, answer only from TENANT KNOWLEDGE below. TENANT KNOWLEDGE is authoritative and overrides pretrained/model knowledge. The following tenant knowledge is verified evidence for this tenant and must be treated as authoritative. Do not invent or infer missing prices, availability, policies, features, guarantees, fees, locations, dates, or operating details. Preserve qualifications such as “starting from”, gym/location dependence, eligibility, and terms. If evidence explicitly says UNKNOWN or the requested fact is absent, say it is not available; do not use the fallback merely because the question is phrased differently from the evidence in the current tenant knowledge and direct the customer to the official support route when appropriate. Distinguish verified facts from assumptions. Use bounded CONVERSATION history only to resolve follow-ups. For an explicit summary or recap request, summarize that bounded conversation history and do not require tenant knowledge. For greetings and general conversation, respond naturally without requiring tenant knowledge. If the question is tenant-specific and evidence is empty, use this fallback: ${i.config.fallbackMessage}`;
+    const policy = `${tenantIdentityPolicy(i.config)}\n${i.prompt}\nStrict grounding policy: For tenant-specific factual questions, answer only from TENANT KNOWLEDGE below. TENANT KNOWLEDGE is authoritative and overrides pretrained/model knowledge. The following tenant knowledge is verified evidence for this tenant and must be treated as authoritative. Do not invent or infer missing prices, availability, policies, features, guarantees, fees, locations, dates, or operating details. Preserve qualifications such as “starting from”, gym/location dependence, eligibility, and terms. Keep answers clear, concise, and in plain prose without unnecessary markdown tables. If evidence explicitly says UNKNOWN or the requested fact is absent, say it is not available; do not use the fallback merely because the question is phrased differently from the evidence in the current tenant knowledge and direct the customer to the official support route when appropriate. Distinguish verified facts from assumptions. Use bounded CONVERSATION history only to resolve follow-ups. For an explicit summary or recap request, summarize that bounded conversation history and do not require tenant knowledge. For greetings and general conversation, respond naturally without requiring tenant knowledge. If the question is tenant-specific and evidence is empty, use this fallback: ${i.config.fallbackMessage}`;
     const boundedHistory = (i.history ?? []).slice(-8);
     const messages = [
       { role: 'system', content: `SYSTEM POLICY\n${policy}` },
