@@ -100,7 +100,7 @@ export const leadSchema = z
     message: z.string().trim().max(2000).optional(),
   })
   .strict()
-  .refine((value) => Boolean(value.requirement || value.message), {
+  .refine((value) => Boolean(value.requirement || value.message || value.conversationId), {
     message: 'Message is required',
     path: ['message'],
   });
