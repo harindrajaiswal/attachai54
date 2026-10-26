@@ -111,4 +111,45 @@ describe('dashboard API families', () => {
     expect(r.json().widget.icon).toBe('sparkles');
     expect(r.body).not.toContain(key);
   });
+  it('lists tenant conversations and resolves linked lead conversation messages as an array', async () => {
+    const chat = await app.inject({
+      method: 'POST',
+      url: '/v1/chat',
+      headers: { 'x-api-key': key, origin: 'https://dash.example' },
+      payload: { message: 'Hello there' },
+    });
+    expect(chat.statusCode).toBe(200);
+    const { conversationId } = chat.json();
+    const lead = await app.inject({
+      method: 'POST',
+      url: '/v1/leads',
+      headers: { 'x-api-key': key, origin: 'https://dash.example' },
+      payload: { name: 'Grace', email: 'grace@example.com', conversationId },
+    });
+    expect(lead.statusCode).toBe(200);
+    const sessions = await app.inject({
+      url: `/admin/clients/${id}/conversations`,
+      headers: h,
+    });
+    expect(sessions.statusCode).toBe(200);
+    expect(sessions.json()[0]).toMatchObject({
+      id: conversationId,
+      messageCount: 2,
+      leadCount: 1,
+    });
+    const sessionDetail = await app.inject({
+      url: `/admin/clients/${id}/conversations/${conversationId}`,
+      headers: h,
+    });
+    expect(sessionDetail.statusCode).toBe(200);
+    expect(Array.isArray(sessionDetail.json().messages)).toBe(true);
+    expect(sessionDetail.json().messages).toHaveLength(2);
+    const leadDetail = await app.inject({
+      url: `/admin/clients/${id}/leads/${lead.json().id}`,
+      headers: h,
+    });
+    expect(leadDetail.statusCode).toBe(200);
+    expect(Array.isArray(leadDetail.json().conversation.messages)).toBe(true);
+    expect(leadDetail.json().conversation.messages).toHaveLength(2);
+  });
 });
