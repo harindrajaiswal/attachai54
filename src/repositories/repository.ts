@@ -54,6 +54,7 @@ export interface Repository {
   removeKnowledge(clientId: string, filename: string): Promise<void>;
   audits(limit?: number): Promise<unknown[]>;
   overview(): Promise<unknown>;
+  conversations?(clientId: string): Promise<unknown[]>;
   conversationForClient(clientId: string, id: string): Promise<unknown | undefined>;
   updateLead(
     clientId: string,
