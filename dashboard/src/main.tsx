@@ -879,7 +879,7 @@ function Knowledge({ client }: { client?: Client }) {
               type="file"
               multiple
               disabled={busy}
-              accept=".txt,.md,.pdf,.docx"
+              accept=".txt,.md,.pdf,.docx,.csv"
               onChange={upload}
             />
             <label htmlFor="upload" className="btn primary">
@@ -1355,7 +1355,7 @@ function Sessions({ client }: { client?: Client }) {
     [detail, setDetail] = useState<any>();
   useEffect(() => {
     setDetail(undefined);
-    if (client) api(`/clients/${client.id}/conversations`).then(setItems);
+    if (client) api(`/clients/${client.id}/conversations`).then(setItems).catch((e) => toast.error(e.message));
   }, [client]);
   async function open(id: string) {
     setDetail(await api(`/clients/${client!.id}/conversations/${id}`));
