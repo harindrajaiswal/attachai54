@@ -204,8 +204,20 @@ export async function adminRoutes(app: FastifyInstance, c: Context) {
     if (!x) throw new AppError(404, 'NOT_FOUND', 'Client not found');
     const preview = await c.chat.preview(id, body.question, body.prompt);
     const context = preview.retrieval.evidence;
-    req.log.info({ clientId: id, retrievedChunks: context.length, status: preview.retrieval.decision.status, sources: context.map((chunk) => chunk.source) }, 'prompt preview retrieval');
-    const sources = context.map((chunk) => ({ source: chunk.source, score: Math.round(chunk.score * 1000) / 1000, chunkId: chunk.id }));
+    req.log.info(
+      {
+        clientId: id,
+        retrievedChunks: context.length,
+        status: preview.retrieval.decision.status,
+        sources: context.map((chunk) => chunk.source),
+      },
+      'prompt preview retrieval',
+    );
+    const sources = context.map((chunk) => ({
+      source: chunk.source,
+      score: Math.round(chunk.score * 1000) / 1000,
+      chunkId: chunk.id,
+    }));
     return { answer: preview.answer, retrieval: { count: context.length, sources }, sources };
   });
   app.post('/clients/:id/prompt', async (req) => {
@@ -257,6 +269,19 @@ export async function adminRoutes(app: FastifyInstance, c: Context) {
   app.post('/clients/:id/knowledge/rebuild', async (req) =>
     c.knowledge.rebuild(idParams.parse(req.params).id),
   );
+  app.get('/clients/:id/conversations', async (req) => {
+    const { id } = idParams.parse(req.params);
+    if (!(await c.repo.getClient(id))) throw new AppError(404, 'NOT_FOUND', 'Client not found');
+    return (await c.repo.conversations?.(id)) ?? [];
+  });
+  app.get('/clients/:id/conversations/:conversationId', async (req) => {
+    const { id } = idParams.parse(req.params),
+      { conversationId } = z.object({ conversationId: z.string().uuid() }).parse(req.params);
+    if (!(await c.repo.getClient(id))) throw new AppError(404, 'NOT_FOUND', 'Client not found');
+    const conv = await c.repo.conversationForClient(id, conversationId);
+    if (!conv) throw new AppError(404, 'NOT_FOUND', 'Conversation not found');
+    return conv;
+  });
   app.get('/clients/:id/leads', async (req) => {
     const { id } = idParams.parse(req.params),
       raw = req.query as Record<string, unknown>,
