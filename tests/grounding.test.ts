@@ -87,4 +87,47 @@ describe('bounded grounding validation', () => {
       ).ok,
     ).toBe(false);
   });
+
+  it('accepts ordered list numbering 1..9 and scoped "All messages... within the Airtasker app" from production Render logs when evidence is prose', () => {
+    const airtaskerChunks = [
+      {
+        id: 'c1',
+        source: 'Airtasker_Limited_testing.txt',
+        score: 0.72,
+        text: 'How Airtasker Works: Customers create an account, post a task describing what needs to be done, set a budget, and receive offers from Taskers.',
+      },
+      {
+        id: 'c2',
+        source: 'Airtasker_Limited_testing.txt',
+        score: 0.69,
+        text: 'Once a Tasker is assigned, payment is held securely in Airtasker Pay until the task is completed and the customer releases payment.',
+      },
+      {
+        id: 'c3',
+        source: 'Airtasker_Limited_testing.txt',
+        score: 0.66,
+        text: 'All messages, photos, and evidence should stay within the Airtasker app to support dispute resolution if an issue arises. Cancellation fees may apply depending on who cancels and whether the task has already started.',
+      },
+    ];
+    const renderLogAnswer = [
+      'Here is how Airtasker works from start to finish:',
+      '1. Create an account and sign in to Airtasker.',
+      '2. Post a task describing what needs to be done and set a budget.',
+      '3. Review offers and questions from available Taskers.',
+      '4. Assign a Tasker and fund the task securely via Airtasker Pay.',
+      '5. Communicate in the app while the Tasker completes the work.',
+      '6. Inspect the completed work and release payment.',
+      '7. Leave a review and rating for the Tasker.',
+      '8. If you need to cancel, cancellation fees may apply depending on who cancels.',
+      '9. For dispute resolution, all messages, photos, and other evidence should stay within the Airtasker app.',
+    ].join('\n');
+
+    const result = validateGrounding(
+      'Can you explain how Airtasker works from start to finish, including what happens if I need to cancel or have a dispute?',
+      renderLogAnswer,
+      airtaskerChunks,
+    );
+    expect(result.ok).toBe(true);
+    expect(result.reasons).toEqual([]);
+  });
 });
