@@ -8,6 +8,24 @@ export type EvidenceDecision = {
   sources: number;
   sufficient: boolean;
 };
+export type StageTimings = {
+  classificationMs: number;
+  dbReadMs: number;
+  embeddingMs: number;
+  initialRetrievalMs: number;
+  reformulationMs: number;
+  additionalRetrievalMs: number;
+  rerankAndContextMs: number;
+  llmFirstTokenMs: number;
+  llmCompleteMs: number;
+  groundingMs: number;
+  correctionMs: number;
+  dbWriteMs: number;
+  totalMs: number;
+  llmCalls: number;
+  embeddingCalls: number;
+  retrievalRounds: number;
+};
 export type RetrievalDiagnostics = {
   query: string;
   expanded: boolean;
@@ -15,12 +33,23 @@ export type RetrievalDiagnostics = {
   candidateCounts: { exact: number; keyword: number; bm25: number; dense: number; fused: number };
   evidence: EvidenceDecision;
   rejected: Array<{ id: string; reason: string }>;
+  timings?: StageTimings;
 };
 export type AdvancedRetrieval = {
   evidence: RetrievedChunk[];
   decision: EvidenceDecision;
   diagnostics: RetrievalDiagnostics;
 };
+
+export type QueryIntent =
+  | 'greeting'
+  | 'closing'
+  | 'identity'
+  | 'summary'
+  | 'follow_up'
+  | 'ambiguous'
+  | 'general'
+  | 'knowledge';
 
 const STOPWORDS = new Set([
   'a',
@@ -50,13 +79,13 @@ const STOPWORDS = new Set([
   'i',
   'my',
   'it',
-  'its',
   'this',
   'that',
   'with',
   'when',
   'where',
   'why',
+  'about',
 ]);
 const SYNONYMS: Record<string, string> = {
   cancellation: 'cancel',
@@ -69,32 +98,155 @@ const SYNONYMS: Record<string, string> = {
   flat: 'property',
   homes: 'property',
   home: 'property',
-  costs: 'price',
-  cost: 'price',
-  pricing: 'price',
-  prices: 'price',
   monthly: 'month',
-  yearly: 'year',
-  annual: 'year',
-  annually: 'year',
-  benefits: 'benefit',
-  advantages: 'benefit',
-  advantage: 'benefit',
+  price: 'cost',
+  pricing: 'cost',
 };
 const MAX_CANDIDATES = 40;
 const RETRIEVAL_K = 20;
-const FINAL_K = 8;
-const CONTEXT_CHARS = 7000;
+const FINAL_K = 6;
+const CONTEXT_CHARS = 5000;
 
-export const tokens = (value: string) =>
-  (value.toLowerCase().match(/[\p{L}\p{N}_/-]+/gu) ?? [])
+function stem(word: string): string {
+  if (word.length > 5 && word.endsWith('ies')) return `${word.slice(0, -3)}y`;
+  if (word.length > 5 && word.endsWith('ing')) return word.slice(0, -3);
+  if (
+    word.length > 4 &&
+    word.endsWith('es') &&
+    !word.endsWith('ses') &&
+    !word.endsWith('xes') &&
+    !word.endsWith('zes')
+  ) {
+    return word.slice(0, -1);
+  }
+  if (word.length > 3 && word.endsWith('s') && !word.endsWith('ss') && !word.endsWith('us')) {
+    return word.slice(0, -1);
+  }
+  return word;
+}
+
+const tokenCache = new Map<string, string[]>();
+
+export const tokens = (value: string): string[] => {
+  const cached = tokenCache.get(value);
+  if (cached) return cached;
+  const computed = (value.toLowerCase().match(/[\p{L}\p{N}_/-]+/gu) ?? [])
+    .map((token) => SYNONYMS[token] ?? stem(token))
     .map((token) => SYNONYMS[token] ?? token)
     .filter((token) => !STOPWORDS.has(token));
-const overlap = (query: Set<string>, text: string) =>
-  [...query].filter((token) => tokens(text).includes(token)).length;
-const comparable = (text: string) => text.toLowerCase().replace(/\s+/g, ' ').trim();
+  if (tokenCache.size > 2000) tokenCache.clear();
+  tokenCache.set(value, computed);
+  return computed;
+};
+
+const overlap = (query: Set<string>, text: string) => {
+  const docTokens = new Set(tokens(text));
+  let count = 0;
+  for (const token of query) {
+    if (docTokens.has(token)) count += 1;
+  }
+  return count;
+};
+const comparable = (text: string) =>
+  text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 const byScore = (items: Array<{ chunk: RetrievedChunk; score: number }>) =>
   items.sort((a, b) => b.score - a.score || a.chunk.id.localeCompare(b.chunk.id));
+
+export function classifyQueryIntent(
+  question: string,
+  history: { role: string; content: string }[] = [],
+): QueryIntent {
+  const q = question.trim();
+  const lower = q.toLowerCase();
+  if (
+    /^(?:hi|hello|hey|good\s+(?:morning|afternoon|evening)|greetings|howdy|yo)(?:[\s!.,?]*|(?:[\s,!]+(?:there|team|assistant|ai|everyone))[\s!.,?]*)$/i.test(
+      q,
+    )
+  ) {
+    return 'greeting';
+  }
+  if (
+    /^(?:thanks|thank\s+you|thx|ty|many\s+thanks|thanks\s+a\s+lot|appreciate\s+it|bye|goodbye|see\s+you|have\s+a\s+good\s+day|that(?:'s|\s+is)\s+all)(?:[\s!.,?]*)$/i.test(
+      q,
+    )
+  ) {
+    return 'closing';
+  }
+  if (
+    /\b(?:summari[sz]e|summary|recap)\b/i.test(q) &&
+    /\b(?:chat|conversation|discussion|messages|thread|far|above|discussed|talked)\b/i.test(q)
+  ) {
+    return 'summary';
+  }
+  if (
+    /\b(?:who\s+are\s+you|what\s+is\s+your\s+name|your\s+role|what\s+company\s+do\s+you\s+work\s+for|which\s+company\s+are\s+you)\b/i.test(
+      q,
+    )
+  ) {
+    return 'identity';
+  }
+  const hasPronoun =
+    /\b(?:it|its|that|this|they|them|their|those|these|there|he|she|him|her)\b/i.test(lower);
+  const startsAsContinuation = /^(?:and|also|what\s+about|how\s+about|what\s+if)\b/i.test(lower);
+  const toks = tokens(q);
+  if (history.length > 0 && (hasPronoun || startsAsContinuation || toks.length <= 3)) {
+    return 'follow_up';
+  }
+  if (
+    history.length === 0 &&
+    toks.length <= 1 &&
+    (hasPronoun ||
+      /^(?:help|info|information|details|more|tell\s+me\s+more|what\s+about\s+it|how\s+much\s+is\s+it|how\s+does\s+it\s+work)[?.!]*$/i.test(
+        q,
+      ))
+  ) {
+    return 'ambiguous';
+  }
+  const tenantCues =
+    /\b(your|our|company|service|services|policy|pricing|price|cost|hours|contact|support|refund|plan|plans|product|products|location|locations|delivery|membership|gym|box|recipe|recipes|task|tasker|airtasker|gousto|account|booking|order|cancel|dispute|fee|fees)\b/i.test(
+      q,
+    );
+  const generalPatterns =
+    /^(what\s+is\s+\d+\s*[\d+\-*/]+\s*\d+|what\s+is\s+the\s+capital\s+of\b|define\s+\w+|translate\b|explain\s+photosynthesis\b)/i.test(
+      q,
+    );
+  if (!tenantCues && generalPatterns) {
+    return 'general';
+  }
+  return 'knowledge';
+}
+
+export function buildAlternativeQueries(question: string): string[] {
+  const q = question.trim();
+  const alts: string[] = [];
+  const stripped = q
+    .replace(
+      /^(?:can\s+you\s+(?:please\s+)?(?:tell\s+me|explain|help\s+me\s+with)|could\s+you\s+(?:please\s+)?(?:tell\s+me|explain)|i\s+(?:would\s+like|want)\s+to\s+know|please\s+(?:tell\s+me|explain)|do\s+you\s+know)\s+/i,
+      '',
+    )
+    .trim();
+  if (stripped && stripped.toLowerCase() !== q.toLowerCase()) {
+    alts.push(stripped);
+  }
+  const keywordOnly = tokens(q).join(' ');
+  if (keywordOnly && keywordOnly.toLowerCase() !== q.toLowerCase() && !alts.includes(keywordOnly)) {
+    alts.push(keywordOnly);
+  }
+  const subParts = q
+    .split(/\b(?:and\s+also|and\s+(?=(?:what|how|when|where|who|can|do|does|is|are)\b)|;|\?)\s*/i)
+    .map((s) => s.trim())
+    .filter((s) => tokens(s).length >= 2);
+  if (subParts.length > 1) {
+    for (const part of subParts.slice(0, 2)) {
+      if (!alts.includes(part)) alts.push(part);
+    }
+  }
+  return alts.slice(0, 3);
+}
 
 export function exactSearch(query: string, chunks: RetrievedChunk[], limit = RETRIEVAL_K) {
   const normalized = comparable(query);
@@ -115,11 +267,11 @@ export function keywordSearch(query: string, chunks: RetrievedChunk[], limit = R
   const queryTerms = new Set(tokens(query));
   return byScore(
     chunks
-      .filter((chunk) => overlap(queryTerms, chunk.text) > 0)
-      .map((chunk) => ({
-        chunk,
-        score: overlap(queryTerms, chunk.text) + chunk.text.length / 1_000_000,
-      })),
+      .map((chunk) => {
+        const hits = overlap(queryTerms, chunk.text);
+        return { chunk, hits, score: hits + chunk.text.length / 1_000_000 };
+      })
+      .filter((x) => x.hits > 0),
   )
     .map((x) => x.chunk)
     .slice(0, limit);
@@ -166,8 +318,13 @@ export function evaluateEvidence(query: string, chunks: RetrievedChunk[]): Evide
   const exact = chunks.some((chunk) => comparable(chunk.text).includes(comparable(query)));
   const strong = chunks.filter((chunk) => chunk.score >= 0.2).length;
   const highDense = chunks.some((chunk) => chunk.score >= 0.5);
-  const status: EvidenceStatus =
-    exact || coverage >= 0.55 || strong >= 2 || highDense
+  const isMultiPart =
+    /\b(?:and|also)\s+(?:what|how|when|where|who|can|do|does|is|are)\b/i.test(query) ||
+    (query.match(/\?/g)?.length ?? 0) > 1;
+  const multiPartPartial = isMultiPart && !exact && coverage >= 0.2 && coverage < 0.65;
+  const status: EvidenceStatus = multiPartPartial
+    ? 'PARTIALLY_SUPPORTED'
+    : exact || coverage >= 0.55 || strong >= 2 || highDense
       ? 'SUPPORTED'
       : (coverage >= 0.2 || strong >= 1) && chunks.length
         ? 'PARTIALLY_SUPPORTED'
@@ -256,7 +413,8 @@ function expandedQuery(query: string, chunks: RetrievedChunk[]) {
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
     .slice(0, 5)
     .map(([term]) => term);
-  return additions.length ? `${query} ${additions.join(' ')}` : query;
+  const alt = buildAlternativeQueries(query)[0] ?? '';
+  return [query, alt, additions.join(' ')].filter(Boolean).join(' ').trim();
 }
 
 function deduplicate(chunks: RetrievedChunk[]) {
@@ -270,9 +428,12 @@ function deduplicate(chunks: RetrievedChunk[]) {
 }
 
 function selectContext(chunks: RetrievedChunk[]) {
+  const deduped = deduplicate(chunks);
+  const topScore = deduped[0]?.score ?? 0;
   const selected: RetrievedChunk[] = [];
   let used = 0;
-  for (const chunk of deduplicate(chunks)) {
+  for (const chunk of deduped) {
+    if (selected.length >= 3 && chunk.score < topScore * 0.45) break;
     const labelLength = `[Source ${selected.length + 1}: ${chunk.source} | chunk ${chunk.id}]\n`
       .length;
     if (used + labelLength + chunk.text.length > CONTEXT_CHARS) break;
@@ -303,7 +464,7 @@ export async function retrieveAdvancedEvidence(input: {
       keyword,
       bm25,
       fused,
-      ranked: rerank(input.question, fused, topTerms, denseScores).slice(0, FINAL_K),
+      ranked: rerank(query, fused, topTerms, denseScores).slice(0, FINAL_K),
     };
   };
   const first = run(input.question, input.dense);
@@ -317,17 +478,14 @@ export async function retrieveAdvancedEvidence(input: {
     dense: input.dense.length,
     fused: first.fused.length,
   };
-  if (
-    (decision.status === 'UNCERTAIN' || decision.status === 'NOT_SUPPORTED') &&
-    first.fused.length > 0
-  ) {
+  if ((decision.status === 'UNCERTAIN' || decision.status === 'NOT_SUPPORTED') && corpus.length) {
     expanded = true;
-    const query = expandedQuery(input.question, first.fused);
-    const second = run(query, []);
+    const query = expandedQuery(input.question, corpus);
+    const second = run(query, input.dense);
     selected = selectContext(
       rerank(
         input.question,
-        rrf([first.fused, second.keyword, second.bm25]),
+        rrf([first.fused, second.keyword, second.bm25, input.dense.slice(0, RETRIEVAL_K)]),
         topTerms,
         denseScores,
       ).slice(0, FINAL_K),
@@ -341,8 +499,8 @@ export async function retrieveAdvancedEvidence(input: {
       fused: Math.min(MAX_CANDIDATES, first.fused.length + second.fused.length),
     };
   }
-  const rejected = first.fused
-    .filter((chunk) => !selected.some((s) => s.id === chunk.id))
+  const rejected = selected
+    .filter((chunk) => chunk.score < 0.2)
     .map((chunk) => ({ id: chunk.id, reason: 'low deterministic rerank score' }));
   return {
     evidence: selected,
@@ -368,20 +526,17 @@ export function buildEvidenceContext(chunks: RetrievedChunk[]) {
 export function cleanAnswerScaffolding(answer: string) {
   const cleaned = answer
     .replace(/\\n/g, '\n')
-    .replace(/```[a-z]*\s*/gi, '')
-    .replace(/```/g, '')
-    .replace(/\[Source\s+\d+[^\]]*\]/gi, '')
-    .replace(/^\s*(?:#{1,6}\s*)?(?:faq|answer)\s*:?\s*/gim, '')
-    .replace(/(?:^|\s)\*{0,2}Q:\s*[^?\n]*\?\*{0,2}\s*\*{0,2}A:\s*\*{0,2}/gi, ' ')
-    .replace(/(?:^|\n|\s)\s*[QA]:\s*/gi, ' ')
+    .replace(/\[Source\s+\d+:[^\]]*\]/gi, ' ')
+    .replace(/(?:^|\n)\s*(?:#{1,6}\s*)?(?:faq|answer)\s*:?\s*/gi, ' ')
+    .replace(/(?:^|\s)Q:\s*[^?\n]+\?\s*A:\s*/gi, ' ')
+    .replace(/(?:^|\n|\s)[QA]:\s*/gi, ' ')
     .replace(/\*{1,3}([^*\n]+)\*{1,3}/g, '$1')
     .replace(/`([^`\n]+)`/g, '$1')
     .replace(/\s+/g, ' ')
     .trim();
-  const sentences = cleaned.match(/[^.!?]+[.!?]+|[^.!?]+$/g) ?? [];
+  const sentences = cleaned.split(/(?<!\b\d+)(?<!\b[a-zA-Z])(?<=[.!?])\s+/).filter(Boolean);
   const seen = new Set<string>();
   return sentences
-    .map((s) => s.trim())
     .filter((sentence) => {
       const key = comparable(sentence);
       if (!key || seen.has(key)) return false;
@@ -398,7 +553,10 @@ export function selectFocusedEvidence(
   question: string,
   maxChars = CONTEXT_CHARS,
 ) {
-  const denseScores = new Map(candidates.map((c) => [c.id, c.score]));
+  const denseScores = new Map<string, number>();
+  for (const c of candidates) {
+    denseScores.set(c.id, Math.max(denseScores.get(c.id) ?? 0, c.score));
+  }
   const ranked = rerank(
     question,
     rrf([
@@ -413,8 +571,20 @@ export function selectFocusedEvidence(
   const evidence: RetrievedChunk[] = [];
   let used = 0;
   for (const chunk of deduplicate(ranked)) {
-    const faq = chunk.text.match(/(?:Q:\s*[^?]+\?\s*)?A:\s*(.*?)(?=\s*Q:|$)/i)?.[1]?.trim();
-    const candidate = faq || chunk.text;
+    const qaPairs = [
+      ...chunk.text.matchAll(/(?:Q:\s*([^?]+\?)\s*)?A:\s*(.*?)(?=\s*Q:|$)/gi),
+    ];
+    let candidate = chunk.text;
+    if (qaPairs.length > 0) {
+      const qSet = new Set(tokens(question));
+      const bestQa = qaPairs
+        .map((m) => ({
+          answer: m[2]?.trim() ?? '',
+          hits: overlap(qSet, `${m[1] ?? ''} ${m[2] ?? ''}`),
+        }))
+        .sort((a, b) => b.hits - a.hits)[0];
+      if (bestQa?.answer) candidate = bestQa.answer;
+    }
     if (used + candidate.length > maxChars) continue;
     evidence.push({ ...chunk, text: candidate });
     used += candidate.length;
