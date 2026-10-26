@@ -401,6 +401,33 @@ export class SupabaseRepository implements Repository {
       leadsToday: lt.count ?? 0,
     };
   }
+  async conversations(clientId: string) {
+    const { data, error } = await this.db
+      .from('conversations')
+      .select('id,client_id,session_id,created_at,messages(created_at),leads(id)')
+      .eq('client_id', clientId)
+      .order('created_at', { ascending: false });
+    if (error) this.fail(error);
+    return (data ?? []).map((x: any) => {
+      const msgs = Array.isArray(x.messages) ? x.messages : [];
+      const leads = Array.isArray(x.leads) ? x.leads : [];
+      const lastMessageAt = msgs.reduce(
+        (latest: string, m: any) =>
+          String(m.created_at) > latest ? String(m.created_at) : latest,
+        String(x.created_at),
+      );
+      return {
+        id: String(x.id),
+        clientId: String(x.client_id),
+        session_id: String(x.session_id),
+        sessionId: String(x.session_id),
+        createdAt: String(x.created_at),
+        messageCount: msgs.length,
+        leadCount: leads.length,
+        lastMessageAt,
+      };
+    });
+  }
   async conversationForClient(clientId: string, id: string) {
     const { data, error } = await this.db
       .from('conversations')
