@@ -79,7 +79,8 @@ CREATE TABLE IF NOT EXISTS lead_workflow(lead_id TEXT PRIMARY KEY,status TEXT NO
   }
   async getClient(id: string) {
     const r = this.db.prepare('SELECT * FROM clients WHERE id=?').get(id) as
-      Record<string, unknown> | undefined;
+      | Record<string, unknown>
+      | undefined;
     return r ? this.map(r) : undefined;
   }
   async getClientByKeyHash(h: string) {
@@ -202,7 +203,8 @@ CREATE TABLE IF NOT EXISTS lead_workflow(lead_id TEXT PRIMARY KEY,status TEXT NO
   }
   async keyStatus(id: string) {
     return this.db.prepare('SELECT enabled,created_at FROM api_keys WHERE client_id=?').get(id) as
-      { enabled: number; created_at: string } | undefined;
+      | { enabled: number; created_at: string }
+      | undefined;
   }
   async setKeyEnabled(id: string, enabled: boolean) {
     return (
@@ -224,7 +226,8 @@ CREATE TABLE IF NOT EXISTS lead_workflow(lead_id TEXT PRIMARY KEY,status TEXT NO
   }
   async promptVersion(id: string) {
     return this.db.prepare('SELECT * FROM prompt_versions WHERE id=?').get(id) as
-      { id: string; client_id: string; prompt: string } | undefined;
+      | { id: string; client_id: string; prompt: string }
+      | undefined;
   }
   async saveKnowledge(
     clientId: string,
@@ -269,11 +272,18 @@ CREATE TABLE IF NOT EXISTS lead_workflow(lead_id TEXT PRIMARY KEY,status TEXT NO
       )
       .get();
   }
+  async conversations(clientId: string) {
+    return this.db
+      .prepare(
+        `SELECT c.id,c.client_id clientId,c.session_id,c.session_id sessionId,c.created_at createdAt,(SELECT count(*) FROM messages m WHERE m.conversation_id=c.id) messageCount,(SELECT count(*) FROM leads l WHERE l.conversation_id=c.id) leadCount,coalesce((SELECT max(m.created_at) FROM messages m WHERE m.conversation_id=c.id),c.created_at) lastMessageAt FROM conversations c WHERE c.client_id=? ORDER BY lastMessageAt DESC`,
+      )
+      .all(clientId);
+  }
   async conversationForClient(clientId: string, id: string) {
     const conversation = this.db
       .prepare('SELECT * FROM conversations WHERE id=? AND client_id=?')
       .get(id, clientId);
-    return conversation ? { ...conversation, messages: this.messages(id) } : undefined;
+    return conversation ? { ...conversation, messages: await this.messages(id) } : undefined;
   }
   async updateLead(
     clientId: string,
@@ -304,7 +314,8 @@ CREATE TABLE IF NOT EXISTS lead_workflow(lead_id TEXT PRIMARY KEY,status TEXT NO
   }
   async setting(key: string) {
     const r = this.db.prepare('SELECT value FROM settings WHERE key=?').get(key) as
-      { value: string } | undefined;
+      | { value: string }
+      | undefined;
     return r ? JSON.parse(r.value) : undefined;
   }
   async analytics(clientId: string, days = 30) {
