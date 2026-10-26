@@ -5,19 +5,20 @@ const widget = await readFile(new URL('../public/widget.js', import.meta.url), '
 
 describe('customer widget streaming UX', () => {
   it('uses the existing SSE protocol and renders token chunks progressively', () => {
-    expect(widget).toContain("/v1/chat/stream");
+    expect(widget).toContain('/v1/chat/stream');
     expect(widget).toContain("eventName==='token'");
     expect(widget).toContain("eventName==='done'");
     expect(widget).toContain("eventName==='error'");
-    expect(widget).toContain("answer+=data.token");
-    expect(widget).toContain("getReader()");
+    expect(widget).toContain('answer+=data.token');
+    expect(widget).toContain('getReader()');
   });
 
   it('has delayed processing state, retryable errors, and duplicate-send protection', () => {
-    expect(widget).toContain("setTimeout(()=>{processing=showProcessing();},250)");
-    expect(widget).toContain("if (busy) return");
+    expect(widget).toContain('setTimeout(()=>{processing=showProcessing();},250)');
+    expect(widget).toContain('if (busy) return');
     expect(widget).toContain('tai-retry');
     expect(widget).toContain('Sorry, I couldn’t complete that response.');
+    expect(widget).toContain('leadSubmitted = false');
   });
 
   it('renders a compact dynamic AI launcher with keyboard and touch affordances', () => {
