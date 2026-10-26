@@ -4,6 +4,7 @@ import type { VectorProvider } from '../providers/vector.js';
 import type { ObjectStorage } from '../providers/storage.js';
 import { chunks, parseDocument } from './parser.js';
 import type { Repository } from '../repositories/repository.js';
+import { AppError } from '../lib/errors.js';
 
 /** Deterministic UUID accepted by PostgreSQL UUID columns and Qdrant point IDs. */
 function stableVectorId(value: string) {
@@ -24,7 +25,7 @@ export class KnowledgeService {
   ) {}
   async upload(clientId: string, name: string, data: Buffer) {
     const text = await parseDocument(name, data);
-    if (!text.trim()) throw new Error('Document contains no text');
+    if (!text.trim()) throw new AppError(400, 'EMPTY_DOCUMENT', 'Document contains no text');
     await this.storage.put(clientId, name, data);
     const parts = chunks(text);
     try {
